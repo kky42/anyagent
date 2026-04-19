@@ -174,6 +174,72 @@ test("subsequent agent messages in the same turn are sent as new Telegram messag
   ]);
 });
 
+test("transient progress after an agent message is cleared when the turn completes", async () => {
+  const { session, fakeBotApi, runnerFactory } = await createSession();
+
+  await session.enqueueMessage("first");
+  const run = runnerFactory.runs[0];
+
+  await run.emit({
+    type: "item.started",
+    item: {
+      id: "item_1",
+      type: "reasoning",
+      status: "in_progress"
+    }
+  });
+  await run.emit({
+    type: "item.completed",
+    item: {
+      id: "item_2",
+      type: "agent_message",
+      text: "working"
+    }
+  });
+  await run.emit({
+    type: "item.started",
+    item: {
+      id: "item_3",
+      type: "todo_list",
+      status: "in_progress"
+    }
+  });
+  await run.emit({
+    type: "turn.completed"
+  });
+  run.finish();
+
+  await flush();
+  await flush();
+
+  assert.deepEqual(fakeBotApi.messages, [
+    {
+      chatId: 1001,
+      text: "🟢 reasoning",
+      parseMode: "HTML"
+    },
+    {
+      chatId: 1001,
+      text: "🟢 todo_list",
+      parseMode: "HTML"
+    }
+  ]);
+  assert.deepEqual(fakeBotApi.edits, [
+    {
+      chatId: 1001,
+      messageId: 1,
+      text: "working",
+      parseMode: "HTML"
+    }
+  ]);
+  assert.deepEqual(fakeBotApi.deletions, [
+    {
+      chatId: 1001,
+      messageId: 2
+    }
+  ]);
+});
+
 test("long final agent_message edits the progress message and sends remaining chunks", async () => {
   const { session, fakeBotApi, runnerFactory } = await createSession();
   const longMessage = `${"A".repeat(3500)}${"B".repeat(250)}`;

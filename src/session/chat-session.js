@@ -138,6 +138,10 @@ export class ChatSession {
     return this.messageRenderer.renderProgressText(text);
   }
 
+  clearProgressMessage() {
+    return this.messageRenderer.clearProgressMessage();
+  }
+
   renderFinalMessage(text) {
     return this.messageRenderer.renderFinalMessage(text, {
       workdir: this.botConfig.workdir
@@ -713,6 +717,9 @@ export class ChatSession {
       if (completedTurn && currentThreadId) {
         const contextLength = await this.resolveContextLength(currentThreadId);
         await this.updateContextLength(contextLength);
+      }
+      if (completedTurn) {
+        await this.clearProgressMessage();
       }
       if (!result.sawTerminalEvent && !emittedError) {
         await this.renderErrorText("Codex exited without a terminal JSON event.");
