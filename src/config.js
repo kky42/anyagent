@@ -8,7 +8,6 @@ import {
   normalizeBotModel,
   normalizeBotReasoningEffort
 } from "./runtime-settings.js";
-import { normalizeBotSchedules } from "./schedules.js";
 import {
   DEFAULT_CONFIG_PATH,
   DEFAULT_STATE_PATH,
@@ -78,14 +77,12 @@ export function normalizeConfig(rawConfig, configPath = DEFAULT_CONFIG_PATH) {
       `${prefix}.allowedUsernames`
     );
     const auto = normalizeBotAuto(bot, prefix);
-    const schedules = normalizeBotSchedules(bot.schedules, `${prefix}.schedules`);
 
     return {
       name,
       token: bot.token.trim(),
       workdir,
       allowedUsernames: [...new Set([...defaultAllowedUsernames, ...allowedUsernames])],
-      schedules,
       auto,
       model: normalizeBotModel(bot, prefix),
       reasoningEffort: normalizeBotReasoningEffort(bot, prefix)

@@ -422,7 +422,7 @@ test("progress message edits fall back to plain text when Telegram HTML and Mark
 });
 
 test("final agent_message can send attachments declared in the stripped output block", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-telegram-relay-output-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-output-"));
   const artifactDir = path.join(tempDir, "artifacts");
   await fs.mkdir(artifactDir, { recursive: true });
   await fs.writeFile(path.join(artifactDir, "chart.png"), "png", "utf8");
@@ -493,7 +493,7 @@ test("final agent_message can send attachments declared in the stripped output b
 });
 
 test("attachment-only final agent_message deletes the transient progress message", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-telegram-relay-output-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-output-"));
   const reportPath = path.join(tempDir, "report.pdf");
   await fs.writeFile(reportPath, "pdf", "utf8");
 
@@ -548,7 +548,7 @@ test("attachment-only final agent_message deletes the transient progress message
 });
 
 test("multiple control blocks preserve text, attachment, and error order", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-telegram-relay-output-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-output-"));
   const chartPath = path.join(tempDir, "chart.png");
   const reportPath = path.join(tempDir, "report.pdf");
   await fs.writeFile(chartPath, "png", "utf8");
@@ -644,7 +644,7 @@ test("multiple control blocks preserve text, attachment, and error order", async
 });
 
 test("oversized outbound attachments become inline errors without sending", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-telegram-relay-output-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-output-"));
   const largePath = path.join(tempDir, "large.bin");
   await fs.writeFile(largePath, "", "utf8");
   await fs.truncate(largePath, 50 * 1024 * 1024 + 1);

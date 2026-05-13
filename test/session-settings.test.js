@@ -17,7 +17,7 @@ test("/workdir without args returns the current workdir", async () => {
 });
 
 test("/workdir expands ~/ paths and persists the new workdir", async () => {
-  const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-telegram-relay-home-"));
+  const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-home-"));
   const desktopDir = path.join(homeDir, "Desktop");
   await fs.mkdir(desktopDir);
   const { session, configStore, fakeBotApi } = await createSession({
@@ -42,7 +42,7 @@ test("/workdir rejects nonexistent paths", async () => {
 });
 
 test("/workdir rejects file paths", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-telegram-relay-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-"));
   const filePath = path.join(tempDir, "config.json");
   await fs.writeFile(filePath, "{}", "utf8");
   const { session, fakeBotApi } = await createSession();
@@ -76,7 +76,7 @@ test("/workdir is a no-op when the normalized path matches the current workdir",
 });
 
 test("/workdir updates config, clears persisted session state, and affects the next run while idle", async () => {
-  const nextWorkdir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-telegram-relay-workdir-"));
+  const nextWorkdir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-workdir-"));
   const { session, stateStore, fakeBotApi, runnerFactory, configStore } = await createSession();
   await session.updateThreadId("thread-old");
   await session.updateContextLength(1200);
@@ -102,7 +102,7 @@ test("/workdir updates config, clears persisted session state, and affects the n
 });
 
 test("/workdir aborts the active run, clears the queue, and uses the new workdir on the next run", async () => {
-  const nextWorkdir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-telegram-relay-workdir-"));
+  const nextWorkdir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-workdir-"));
   const { session, runnerFactory, stateStore } = await createSession();
   await session.updateThreadId("thread-old");
 
@@ -124,7 +124,7 @@ test("/workdir aborts the active run, clears the queue, and uses the new workdir
 });
 
 test("/workdir leaves workdir and thread state unchanged when config persistence fails", async () => {
-  const nextWorkdir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-telegram-relay-workdir-"));
+  const nextWorkdir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-workdir-"));
   const configStore = new FakeConfigStore();
   configStore.failure = new Error("disk full");
   const { session, stateStore, fakeBotApi } = await createSession({ configStore });
@@ -140,7 +140,7 @@ test("/workdir leaves workdir and thread state unchanged when config persistence
 });
 
 test("/workdir rolls back config and in-memory workdir if clearing the session state fails", async () => {
-  const nextWorkdir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-telegram-relay-workdir-"));
+  const nextWorkdir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-workdir-"));
   const { session, stateStore, configStore, fakeBotApi } = await createSession();
   await session.updateThreadId("thread-old");
   await session.updateContextLength(1200);
@@ -302,7 +302,7 @@ test("/reasoning with a value persists to state/config and affects next run", as
 });
 
 test("/reset reloads config defaults, clears chat overrides, and starts a new session", async () => {
-  const nextWorkdir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-telegram-relay-reset-"));
+  const nextWorkdir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-reset-"));
   const { session, fakeBotApi, stateStore, configStore } = await createSession({
     botConfig: {
       workdir: "/tmp/project-old",
@@ -377,7 +377,7 @@ test("runtime settings changes fail entirely when config persistence fails", asy
 });
 
 test("state store reads only the current context length schema", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-telegram-relay-state-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-state-"));
   const statePath = path.join(tempDir, "state.json");
   await fs.writeFile(
     statePath,

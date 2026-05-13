@@ -1,16 +1,14 @@
-import { ALBUM_QUIET_PERIOD_MS, hasSupportedAttachment, unsupportedAttachmentMessage } from "../attachments.js";
-import { startCodexRun } from "../codex/runner.js";
-import { ChatSession } from "../session/chat-session.js";
-import { NOOP_CONFIG_STORE } from "../session/session-persistence.js";
-import { TelegramApiError, TelegramBotApi } from "../telegram-api.js";
-import { DEFAULT_CACHE_PATH, normalizeTelegramUsername, sleep, toErrorMessage } from "../utils.js";
+import { startCodexRun } from "../../cli_adapter/codex/runner.js";
+import { DEFAULT_CACHE_PATH, normalizeTelegramUsername, sleep, toErrorMessage } from "../../utils.js";
+import { ALBUM_QUIET_PERIOD_MS, hasSupportedAttachment, unsupportedAttachmentMessage } from "./attachments.js";
+import { ChatSession } from "./chat-session.js";
 import { routeTextMessage } from "./command-router.js";
 import { MediaGroupBuffer } from "./media-group-buffer.js";
-import { ScheduleService } from "./schedule-service.js";
+import { NOOP_CONFIG_STORE } from "./session-persistence.js";
+import { TelegramApiError, TelegramBotApi } from "./telegram-api.js";
 
 export const TELEGRAM_COMMANDS = [
   { command: "status", description: "Show current Codex status" },
-  { command: "schedule", description: "Manage scheduled prompts for this chat" },
   { command: "workdir", description: "Show or change the bot workdir" },
   { command: "auto", description: "Set Codex automation level for this chat" },
   { command: "model", description: "Set model for future runs" },
@@ -55,14 +53,6 @@ export class BotRuntime {
     this.pollAbortController = null;
     this.sessions = new Map();
     this.mediaGroupBuffer = new MediaGroupBuffer({ quietPeriodMs: albumQuietPeriodMs });
-    this.scheduleService = new ScheduleService({
-      botConfig: this.botConfig,
-      configStore: this.configStore,
-      createCodexRun: this.createCodexRun,
-      sessionFor: (chatId) => this.sessionFor(chatId),
-      sendCodexOutput: (chatId, text) => this.sessionFor(chatId).sendCodexOutput(text),
-      log: (message) => this.log(message)
-    });
   }
 
   log(message) {
@@ -136,10 +126,6 @@ export class BotRuntime {
     await session.sendText(`Cleared cache for ${this.botConfig.name}.`);
   }
 
-  async tickSchedules(now = new Date()) {
-    await this.scheduleService.tickSchedules(now);
-  }
-
   async handleMessage(message) {
     const chatId = message.chat?.id;
     if (!chatId) {
@@ -193,7 +179,6 @@ export class BotRuntime {
     await this.initialize();
     this.polling = true;
     this.pollAbortController = new AbortController();
-    this.scheduleService.startLoop();
 
     this.pollPromise = (async () => {
       while (this.polling) {
@@ -234,7 +219,6 @@ export class BotRuntime {
 
     this.polling = false;
     this.pollAbortController?.abort();
-    this.scheduleService.stopLoop();
     this.mediaGroupBuffer.clear();
 
     for (const session of this.sessions.values()) {

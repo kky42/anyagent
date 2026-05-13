@@ -3,11 +3,11 @@ import {
   AUTO_LEVEL_LOW,
   AUTO_LEVEL_MEDIUM,
   normalizeAutoMode
-} from "../auto-mode.js";
+} from "../../auto-mode.js";
 import {
   DEFAULT_MODEL,
   DEFAULT_REASONING_EFFORT
-} from "../runtime-settings.js";
+} from "../../runtime-settings.js";
 
 /**
  * @typedef {object} CodexRunRequest

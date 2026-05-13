@@ -6,18 +6,18 @@ import {
   attachmentDescriptorFromMessage,
   attachmentLimitText,
   buildAttachmentFileName
-} from "../attachments.js";
-import { formatAuto, parseAutoArgument } from "../auto-mode.js";
-import { buildCodexArgs } from "../codex/args.js";
-import { eventToActions } from "../codex/events.js";
-import { readContextLengthForThread } from "../codex/context-length.js";
-import { startCodexRun } from "../codex/runner.js";
-import { buildTurnInputMessage } from "../prompt/turn-input.js";
-import { TELEGRAM_OUTPUT_DEVELOPER_INSTRUCTIONS } from "../prompt/telegram-output.js";
-import { renderStatusMessage } from "../render.js";
+} from "./attachments.js";
+import { formatAuto, parseAutoArgument } from "../../auto-mode.js";
+import { buildCodexArgs } from "../../cli_adapter/codex/args.js";
+import { readContextLengthForThread } from "../../cli_adapter/codex/context-length.js";
+import { eventToActions } from "../../cli_adapter/codex/events.js";
+import { startCodexRun } from "../../cli_adapter/codex/runner.js";
+import { buildTurnInputMessage } from "../../cli_adapter/turn-input.js";
+import { TELEGRAM_OUTPUT_DEVELOPER_INSTRUCTIONS } from "./output-instructions.js";
+import { renderStatusMessage } from "./render.js";
 import {
   normalizeSettingArgument
-} from "../runtime-settings.js";
+} from "../../runtime-settings.js";
 import {
   DEFAULT_CACHE_PATH,
   buildChatCacheDirName,
@@ -27,8 +27,8 @@ import {
   INVALID_WORKDIR_MESSAGE,
   resolveWorkdirPath,
   toErrorMessage
-} from "../utils.js";
-import { unsupportedAttachmentMessage } from "../attachments.js";
+} from "../../utils.js";
+import { unsupportedAttachmentMessage } from "./attachments.js";
 import { MessageRenderer } from "./message-renderer.js";
 import { NOOP_CONFIG_STORE, SessionPersistence } from "./session-persistence.js";
 import { prepareForSessionReset, resetSession } from "./session-reset.js";
@@ -38,7 +38,7 @@ function normalizeCaption(value) {
 }
 
 /**
- * @typedef {import("../prompt/turn-input.js").Turn} Turn
+ * @typedef {import("../../cli_adapter/turn-input.js").Turn} Turn
  */
 
 export class ChatSession {

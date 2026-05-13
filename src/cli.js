@@ -1,13 +1,13 @@
 import process from "node:process";
 
-import { BotRuntime } from "./bot-runtime.js";
+import { BotRuntime } from "./agent_adapter/telegram/bot-runtime.js";
 import { ConfigStore } from "./config-store.js";
 import { loadConfig } from "./config.js";
 import { StateStore } from "./state-store.js";
 import { DEFAULT_CONFIG_PATH, toErrorMessage } from "./utils.js";
 
 function printHelp() {
-  process.stdout.write(`Usage: codex-telegram-relay [--config /path/to/config.json]
+  process.stdout.write(`Usage: anyagent [--config /path/to/config.json]
 
 Options:
   --config <path>  Use a custom config file

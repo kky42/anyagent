@@ -21,7 +21,6 @@ test("normalizeConfig applies top-level allowed usernames and normalizes usernam
   assert.equal(config.bots[0].auto, "high");
   assert.equal(config.bots[0].model, "default");
   assert.equal(config.bots[0].reasoningEffort, "default");
-  assert.deepEqual(config.bots[0].schedules, []);
 });
 
 test("normalizeConfig defaults auto/model/reasoningEffort", () => {
@@ -101,35 +100,4 @@ test("normalizeConfig accepts arbitrary model/reasoningEffort strings", () => {
 
   assert.equal(config.bots[0].model, "my-model-v0");
   assert.equal(config.bots[0].reasoningEffort, "ultra-custom");
-});
-
-test("normalizeConfig includes normalized schedules", () => {
-  const config = normalizeConfig({
-    bots: [
-      {
-        name: "primary",
-        token: "token-1",
-        schedules: [
-          {
-            name: "daily-report",
-            auto: "medium",
-            cron: "0 9 * * 1-5",
-            prompt: "summarize",
-            chatId: 1001
-          }
-        ]
-      }
-    ]
-  });
-
-  assert.deepEqual(config.bots[0].schedules, [
-    {
-      name: "daily-report",
-      auto: "medium",
-      cron: "0 9 * * 1-5",
-      prompt: "summarize",
-      chatId: 1001,
-      enabled: true
-    }
-  ]);
 });

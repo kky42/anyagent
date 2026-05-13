@@ -8,7 +8,7 @@ import {
   findCodexRolloutPathForThread,
   readCodexFinalCallTokenUsageFromRollout,
   readContextLengthForThread
-} from "../src/context-length.js";
+} from "../src/cli_adapter/codex/context-length.js";
 
 test("readCodexFinalCallTokenUsageFromRollout returns the last token_count usage", async () => {
   const fixturePath = path.join(process.cwd(), "test", "fixtures", "codex-rollout.jsonl");
@@ -24,7 +24,7 @@ test("readCodexFinalCallTokenUsageFromRollout returns the last token_count usage
 });
 
 test("findCodexRolloutPathForThread and readContextLengthForThread use the newest rollout file", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-telegram-relay-rollout-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-rollout-"));
   const threadId = "thread-xyz";
   const dateDir = path.join(tempDir, "2026", "04", "14");
   await fs.mkdir(dateDir, { recursive: true });

@@ -132,7 +132,7 @@ test("runtime routes /model and /reasoning to the session", async () => {
 });
 
 test("runtime routes /reset to the session", async () => {
-  const nextWorkdir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-telegram-relay-reset-"));
+  const nextWorkdir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-reset-"));
   const { runtime, fakeBotApi, stateStore, configStore } = await createRuntime({
     botConfig: {
       auto: "low",
@@ -168,7 +168,7 @@ test("runtime routes /reset to the session", async () => {
 });
 
 test("runtime routes /workdir to the session", async () => {
-  const nextWorkdir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-telegram-relay-workdir-"));
+  const nextWorkdir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-workdir-"));
   const { runtime, fakeBotApi, configStore } = await createRuntime();
 
   await runtime.handleMessage(buildTextMessage(`/workdir ${nextWorkdir}`));

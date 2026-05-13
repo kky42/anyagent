@@ -3,7 +3,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { eventToActions, parseJsonlLine } from "../src/codex-events.js";
+import { eventToActions, parseJsonlLine } from "../src/cli_adapter/codex/events.js";
 
 const fixturePath = path.join(process.cwd(), "test", "fixtures", "codex-events.jsonl");
 

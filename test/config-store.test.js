@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { ConfigStore } from "../src/config-store.js";
 
 test("ConfigStore patches target bot defaults in config.json", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-telegram-relay-config-store-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-config-store-"));
   const configPath = path.join(tempDir, "config.json");
   await fs.writeFile(
     configPath,

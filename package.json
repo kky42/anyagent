@@ -1,10 +1,10 @@
 {
-  "name": "codex-telegram-relay",
+  "name": "anyagent",
   "version": "0.2.0",
-  "description": "Lightweight Codex x Telegram bot relay",
+  "description": "Lightweight chat relay for CLI coding agents",
   "type": "module",
   "bin": {
-    "codex-telegram-relay": "bin/codex-telegram-relay.js"
+    "anyagent": "bin/anyagent.js"
   },
   "files": [
     "bin",
@@ -16,14 +16,15 @@
     "node": ">=20"
   },
   "scripts": {
-    "start": "node ./bin/codex-telegram-relay.js",
+    "start": "node ./bin/anyagent.js",
     "test": "node --test test/*.test.js",
     "verify:context-length": "node ./scripts/verify-context-length.js"
   },
   "keywords": [
+    "agent",
     "codex",
     "telegram",
-    "bot"
+    "relay"
   ],
   "license": "MIT"
 }

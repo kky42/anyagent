@@ -1,4 +1,4 @@
-import { normalizeTelegramUsername } from "../utils.js";
+import { normalizeTelegramUsername } from "../../utils.js";
 
 export function parseCommand(text, botUsername) {
   const trimmed = String(text || "").trim();
@@ -27,9 +27,6 @@ export async function routeTextMessage({ text, botUsername, session, runtime }) 
   switch (parsedCommand?.command) {
     case "status":
       await session.handleStatus();
-      return;
-    case "schedule":
-      await runtime.scheduleService.handleCommand(session, parsedCommand.args);
       return;
     case "auto":
       await session.handleAuto(parsedCommand.args);

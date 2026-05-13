@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { TelegramBotApi, TelegramApiError } from "../src/telegram-api.js";
+import { TelegramBotApi, TelegramApiError } from "../src/agent_adapter/telegram/telegram-api.js";
 
 test("editMessageText sends the Telegram edit payload", async () => {
   const calls = [];
@@ -154,7 +154,7 @@ test("deleteMessage sends the Telegram delete payload", async () => {
 });
 
 test("sendLocalAttachment uploads a multipart Telegram payload", async () => {
-  const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-telegram-relay-telegram-api-"));
+  const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-telegram-api-"));
   const filePath = path.join(workdir, "report.pdf");
   await fs.writeFile(filePath, "pdf", "utf8");
 

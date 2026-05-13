@@ -5,10 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
-import { ChatSession } from "../src/bot-runtime.js";
+import { ChatSession } from "../src/agent_adapter/telegram/chat-session.js";
+import { readContextLengthForThread } from "../src/cli_adapter/codex/context-length.js";
+import { startCodexRun } from "../src/cli_adapter/codex/runner.js";
 import { StateStore } from "../src/state-store.js";
-import { startCodexRun } from "../src/codex-runner.js";
-import { readContextLengthForThread } from "../src/context-length.js";
 import { toErrorMessage } from "../src/utils.js";
 
 class SilentBotApi {
@@ -134,7 +134,7 @@ async function main(argv = process.argv.slice(2)) {
     return;
   }
 
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-telegram-relay-verify-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-verify-"));
   const statePath = path.join(tempDir, "state.json");
   const stateStore = new StateStore(statePath);
   await stateStore.load();

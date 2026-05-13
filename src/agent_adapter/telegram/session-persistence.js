@@ -1,9 +1,9 @@
 import {
   DEFAULT_MODEL,
   DEFAULT_REASONING_EFFORT
-} from "../runtime-settings.js";
-import { AUTO_DEFAULT } from "../auto-mode.js";
-import { toErrorMessage } from "../utils.js";
+} from "../../runtime-settings.js";
+import { AUTO_DEFAULT } from "../../auto-mode.js";
+import { toErrorMessage } from "../../utils.js";
 
 export const NOOP_CONFIG_STORE = {
   async patchBotConfig() {},

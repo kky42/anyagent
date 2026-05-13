@@ -5,8 +5,9 @@ import process from "node:process";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildCodexArgs, startCodexRun } from "../src/codex-runner.js";
-import { TELEGRAM_OUTPUT_DEVELOPER_INSTRUCTIONS } from "../src/prompt/telegram-output.js";
+import { buildCodexArgs } from "../src/cli_adapter/codex/args.js";
+import { startCodexRun } from "../src/cli_adapter/codex/runner.js";
+import { TELEGRAM_OUTPUT_DEVELOPER_INSTRUCTIONS } from "../src/agent_adapter/telegram/output-instructions.js";
 
 test("buildCodexArgs uses exec for a fresh thread", () => {
   assert.deepEqual(buildCodexArgs({
@@ -219,7 +220,7 @@ test("buildCodexArgs injects developer_instructions only for fresh threads", () 
 });
 
 test("startCodexRun invokes codex with exec-scoped workdir arguments", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-telegram-relay-args-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-args-"));
   const fakeCodexPath = path.join(tempDir, "codex");
   await fs.writeFile(
     fakeCodexPath,
@@ -264,7 +265,7 @@ process.stdout.write(JSON.stringify(process.argv.slice(2)) + "\\n");
 });
 
 test("startCodexRun forces SIGKILL when the child ignores SIGTERM", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-telegram-relay-runner-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-runner-"));
   const fakeCodexPath = path.join(tempDir, "codex");
   await fs.writeFile(
     fakeCodexPath,

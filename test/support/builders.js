@@ -2,12 +2,13 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { BotRuntime, ChatSession } from "../../src/bot-runtime.js";
+import { BotRuntime } from "../../src/agent_adapter/telegram/bot-runtime.js";
+import { ChatSession } from "../../src/agent_adapter/telegram/chat-session.js";
 import { StateStore } from "../../src/state-store.js";
 import { createControlledRunnerFactory, FakeBotApi, FakeConfigStore } from "./fakes.js";
 
 export async function createSession(options = {}) {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-telegram-relay-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-"));
   const statePath = path.join(tempDir, "state.json");
   const cacheRootDir = path.join(tempDir, "cache");
   const stateStore = new StateStore(statePath);
@@ -46,7 +47,7 @@ export async function createSession(options = {}) {
 }
 
 export async function createRuntime(options = {}) {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-telegram-relay-runtime-"));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-runtime-"));
   const stateStore = new StateStore(path.join(tempDir, "state.json"));
   await stateStore.load();
 

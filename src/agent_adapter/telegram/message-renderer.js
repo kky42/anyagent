@@ -4,11 +4,11 @@ import path from "node:path";
 import {
   OUTBOUND_ATTACHMENT_SIZE_LIMIT_BYTES,
   outboundAttachmentLimitText
-} from "../attachments.js";
-import { parseTelegramOutputSegments } from "../output-attachments.js";
-import { escapeTelegramMarkdown } from "../render.js";
-import { TelegramApiError } from "../telegram-api.js";
-import { splitPlainText } from "../utils.js";
+} from "./attachments.js";
+import { splitPlainText } from "../../utils.js";
+import { parseTelegramOutputSegments } from "./output-attachments.js";
+import { escapeTelegramMarkdown } from "./render.js";
+import { TelegramApiError } from "./telegram-api.js";
 
 const TELEGRAM_RENDER_CHUNK_SIZE = 3500;
 

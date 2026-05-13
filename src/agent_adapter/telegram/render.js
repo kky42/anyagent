@@ -1,6 +1,6 @@
 import { summarizeTurn } from "./attachments.js";
-import { formatAuto } from "./auto-mode.js";
-import { splitPlainText } from "./utils.js";
+import { formatAuto } from "../../auto-mode.js";
+import { splitPlainText } from "../../utils.js";
 
 const MARKDOWN_V2_SPECIAL_CHARS = /[_*[\]()~`>#+\-=|{}.!\\]/g;
 

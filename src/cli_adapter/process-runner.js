@@ -1,40 +1,20 @@
 import { spawn } from "node:child_process";
 
-import { buildCodexArgs } from "./args.js";
-import { parseJsonlLine } from "./events.js";
-
 function hasChildExited(child) {
   return child.exitCode !== null || child.signalCode !== null;
 }
 
-export function startCodexRun({
-  workdir,
-  threadId,
-  message,
-  imagePaths = [],
-  outputLastMessagePath = null,
-  ephemeral = false,
-  autoMode,
-  model,
-  reasoningEffort,
-  developerInstructions,
+export function startCliJsonRun({
+  command,
+  args,
+  displayName = command,
+  parseEventLine,
+  isTerminalEvent,
   forceKillDelayMs = 3000,
   onEvent = async () => {},
   onStdErr = () => {}
 }) {
-  const args = buildCodexArgs({
-    workdir,
-    threadId,
-    message,
-    imagePaths,
-    outputLastMessagePath,
-    ephemeral,
-    autoMode,
-    model,
-    reasoningEffort,
-    developerInstructions
-  });
-  const child = spawn("codex", args, {
+  const child = spawn(command, args, {
     cwd: process.cwd(),
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"]
@@ -48,20 +28,23 @@ export function startCodexRun({
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
 
+  const handleEvent = (event) => {
+    if (!event) {
+      return;
+    }
+    if (isTerminalEvent(event)) {
+      sawTerminalEvent = true;
+    }
+    pending = pending.then(() => onEvent(event));
+  };
+
   child.stdout.on("data", (chunk) => {
     stdoutBuffer += chunk;
     const lines = stdoutBuffer.split(/\r?\n/);
     stdoutBuffer = lines.pop() ?? "";
 
     for (const line of lines) {
-      const event = parseJsonlLine(line);
-      if (!event) {
-        continue;
-      }
-      if (event.type === "turn.completed" || event.type === "turn.failed" || event.type === "error") {
-        sawTerminalEvent = true;
-      }
-      pending = pending.then(() => onEvent(event));
+      handleEvent(parseEventLine(line));
     }
   });
 
@@ -73,17 +56,7 @@ export function startCodexRun({
     child.once("error", reject);
     child.once("close", async (code, signal) => {
       if (stdoutBuffer.trim()) {
-        const event = parseJsonlLine(stdoutBuffer);
-        if (event) {
-          if (
-            event.type === "turn.completed" ||
-            event.type === "turn.failed" ||
-            event.type === "error"
-          ) {
-            sawTerminalEvent = true;
-          }
-          pending = pending.then(() => onEvent(event));
-        }
+        handleEvent(parseEventLine(stdoutBuffer));
       }
 
       try {
@@ -103,7 +76,7 @@ export function startCodexRun({
         return;
       }
 
-      reject(new Error(`codex exited with code ${code}${signal ? ` (signal ${signal})` : ""}`));
+      reject(new Error(`${displayName} exited with code ${code}${signal ? ` (signal ${signal})` : ""}`));
     });
   });
 
