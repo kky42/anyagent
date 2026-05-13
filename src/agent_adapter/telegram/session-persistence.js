@@ -22,7 +22,7 @@ function applyObjectPatch(target, patch) {
 
 function runtimeStateFromAgent(agent) {
   return {
-    threadId: null,
+    sessionId: null,
     contextLength: null,
     workdir: agent?.workdir,
     auto: agent?.auto ?? AUTO_DEFAULT,
@@ -37,12 +37,12 @@ export class SessionPersistence {
     this.state = runtimeStateFromAgent(botConfig.agent);
   }
 
-  get threadId() {
-    return this.state.threadId;
+  get sessionId() {
+    return this.state.sessionId;
   }
 
-  set threadId(threadId) {
-    this.state.threadId = threadId;
+  set sessionId(sessionId) {
+    this.state.sessionId = sessionId;
   }
 
   get contextLength() {
@@ -85,8 +85,8 @@ export class SessionPersistence {
     this.state.reasoningEffort = reasoningEffort;
   }
 
-  async updateThreadId(threadId) {
-    this.threadId = threadId;
+  async updateSessionId(sessionId) {
+    this.sessionId = sessionId;
   }
 
   async updateContextLength(contextLength) {
@@ -94,7 +94,7 @@ export class SessionPersistence {
   }
 
   async clearPersistedState() {
-    this.threadId = null;
+    this.sessionId = null;
     this.contextLength = null;
   }
 

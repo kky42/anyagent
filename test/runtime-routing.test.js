@@ -199,7 +199,7 @@ test("runtime routes /reset to the current chat session only", async () => {
   await runtime.handleMessage(buildTextMessage("/reset"));
 
   const session = runtime.sessionFor(1001);
-  assert.equal(session.threadId, null);
+  assert.equal(session.sessionId, null);
   assert.equal(session.contextLength, null);
   assert.equal(session.workdir, nextWorkdir);
   assert.equal(session.auto, "medium");

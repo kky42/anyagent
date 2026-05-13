@@ -5,9 +5,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  findCodexRolloutPathForThread,
+  findCodexRolloutPathForSession,
   readCodexFinalCallTokenUsageFromRollout,
-  readContextLengthForThread
+  readContextLengthForSession
 } from "../src/cli_adapter/codex/context-length.js";
 
 test("readCodexFinalCallTokenUsageFromRollout returns the last token_count usage", async () => {
@@ -23,14 +23,14 @@ test("readCodexFinalCallTokenUsageFromRollout returns the last token_count usage
   });
 });
 
-test("findCodexRolloutPathForThread and readContextLengthForThread use the newest rollout file", async () => {
+test("findCodexRolloutPathForSession and readContextLengthForSession use the newest rollout file", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-rollout-"));
-  const threadId = "thread-xyz";
+  const sessionId = "session-xyz";
   const dateDir = path.join(tempDir, "2026", "04", "14");
   await fs.mkdir(dateDir, { recursive: true });
 
-  const olderPath = path.join(dateDir, `rollout-older-${threadId}.jsonl`);
-  const newerPath = path.join(dateDir, `rollout-newer-${threadId}.jsonl`);
+  const olderPath = path.join(dateDir, `rollout-older-${sessionId}.jsonl`);
+  const newerPath = path.join(dateDir, `rollout-newer-${sessionId}.jsonl`);
   const fixture = await fs.readFile(path.join(process.cwd(), "test", "fixtures", "codex-rollout.jsonl"), "utf8");
   await fs.writeFile(olderPath, fixture.replace("\"input_tokens\":1540", "\"input_tokens\":1100"), "utf8");
   await fs.writeFile(newerPath, fixture, "utf8");
@@ -40,8 +40,8 @@ test("findCodexRolloutPathForThread and readContextLengthForThread use the newes
   await fs.utimes(olderPath, olderMtime, olderMtime);
   await fs.utimes(newerPath, newerMtime, newerMtime);
 
-  const rolloutPath = await findCodexRolloutPathForThread(threadId, { sessionsDir: tempDir });
-  const contextLength = await readContextLengthForThread(threadId, { sessionsDir: tempDir });
+  const rolloutPath = await findCodexRolloutPathForSession(sessionId, { sessionsDir: tempDir });
+  const contextLength = await readContextLengthForSession(sessionId, { sessionsDir: tempDir });
 
   assert.equal(rolloutPath, newerPath);
   assert.equal(contextLength, 1625);

@@ -21,8 +21,8 @@ test("fixture events produce only visible actions and usage updates", async () =
 
   assert.deepEqual(actions, [
     {
-      kind: "thread_started",
-      threadId: "019d89e6-1949-7af1-aa82-9d13d9adc4a3"
+      kind: "session_started",
+      sessionId: "019d89e6-1949-7af1-aa82-9d13d9adc4a3"
     },
     {
       kind: "progress",

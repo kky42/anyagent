@@ -1,7 +1,7 @@
 /**
  * @typedef {object} CodexAction
- * @property {"thread_started" | "turn_completed" | "progress" | "error" | "message"} kind
- * @property {string | null | undefined} [threadId]
+ * @property {"session_started" | "turn_completed" | "progress" | "error" | "message"} kind
+ * @property {string | null | undefined} [sessionId]
  * @property {string | undefined} [text]
  */
 
@@ -36,7 +36,7 @@ export function eventToActions(event) {
 
   switch (event.type) {
     case "thread.started":
-      return [{ kind: "thread_started", threadId: event.thread_id ?? null }];
+      return [{ kind: "session_started", sessionId: event.thread_id ?? null }];
     case "turn.completed":
       return [{ kind: "turn_completed" }];
     case "turn.failed":

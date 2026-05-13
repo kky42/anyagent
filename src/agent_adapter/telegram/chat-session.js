@@ -9,7 +9,7 @@ import {
 } from "./attachments.js";
 import { formatAuto, parseAutoArgument } from "../../auto-mode.js";
 import { buildCodexArgs } from "../../cli_adapter/codex/args.js";
-import { readContextLengthForThread } from "../../cli_adapter/codex/context-length.js";
+import { readContextLengthForSession } from "../../cli_adapter/codex/context-length.js";
 import { eventToActions } from "../../cli_adapter/codex/events.js";
 import { startCodexRun } from "../../cli_adapter/codex/runner.js";
 import { buildTurnInputMessage } from "../../cli_adapter/turn-input.js";
@@ -50,7 +50,7 @@ export class ChatSession {
     chatId,
     cacheRootDir = DEFAULT_CACHE_PATH,
     createCodexRun = startCodexRun,
-    resolveContextLength = readContextLengthForThread,
+    resolveContextLength = readContextLengthForSession,
     resolveHomeDir
   }) {
     this.botConfig = botConfig;
@@ -72,12 +72,12 @@ export class ChatSession {
     });
   }
 
-  get threadId() {
-    return this.persistence.threadId;
+  get sessionId() {
+    return this.persistence.sessionId;
   }
 
-  set threadId(threadId) {
-    this.persistence.threadId = threadId;
+  set sessionId(sessionId) {
+    this.persistence.sessionId = sessionId;
   }
 
   get contextLength() {
@@ -306,8 +306,8 @@ export class ChatSession {
     }
   }
 
-  updateThreadId(threadId) {
-    return this.persistence.updateThreadId(threadId);
+  updateSessionId(sessionId) {
+    return this.persistence.updateSessionId(sessionId);
   }
 
   updateContextLength(contextLength) {
@@ -381,7 +381,7 @@ export class ChatSession {
     await this.clearPersistedState();
 
     await this.sendText(
-      `Workdir set to ${nextWorkdir}. Started a new session. The next message will open a fresh Codex thread.`
+      `Workdir set to ${nextWorkdir}. Started a new session. The next message will open a fresh Codex session.`
     );
   }
 
@@ -508,7 +508,7 @@ export class ChatSession {
 
   async handleNewSession() {
     await resetSession(this, { clearPersistedState: true });
-    await this.sendText("Started a new session. The next message will open a fresh Codex thread.");
+    await this.sendText("Started a new session. The next message will open a fresh Codex session.");
   }
 
   async handleReset() {
@@ -571,7 +571,7 @@ export class ChatSession {
     this.resetTransientTurnState();
 
     let emittedError = false;
-    let currentThreadId = this.threadId;
+    let currentSessionId = this.sessionId;
     let completedTurn = false;
     const imagePaths = nextTurn.attachments
       .filter((attachment) => attachment.mode === "native-image")
@@ -579,7 +579,7 @@ export class ChatSession {
     const message = buildTurnInputMessage(nextTurn);
     const debugArgs = buildCodexArgs({
       workdir: this.workdir,
-      threadId: this.threadId,
+      sessionId: this.sessionId,
       message,
       imagePaths,
       autoMode: this.auto,
@@ -593,7 +593,7 @@ export class ChatSession {
     }
     this.logger(
       `starting codex run ${JSON.stringify({
-        threadId: this.threadId,
+        sessionId: this.sessionId,
         attachments: nextTurn.attachments.map((attachment) => ({
           kind: attachment.kind,
           mode: attachment.mode,
@@ -605,7 +605,7 @@ export class ChatSession {
 
     const run = this.createCodexRun({
       workdir: this.workdir,
-      threadId: this.threadId,
+      sessionId: this.sessionId,
       message,
       imagePaths,
       autoMode: this.auto,
@@ -615,9 +615,9 @@ export class ChatSession {
       onEvent: async (event) => {
         const actions = eventToActions(event);
         for (const action of actions) {
-          if (action.kind === "thread_started" && action.threadId) {
-            currentThreadId = action.threadId;
-            await this.updateThreadId(action.threadId);
+          if (action.kind === "session_started" && action.sessionId) {
+            currentSessionId = action.sessionId;
+            await this.updateSessionId(action.sessionId);
             continue;
           }
           if (action.kind === "turn_completed") {
@@ -653,8 +653,8 @@ export class ChatSession {
       if (result.aborted) {
         return;
       }
-      if (completedTurn && currentThreadId) {
-        const contextLength = await this.resolveContextLength(currentThreadId);
+      if (completedTurn && currentSessionId) {
+        const contextLength = await this.resolveContextLength(currentSessionId);
         await this.updateContextLength(contextLength);
       }
       if (completedTurn) {

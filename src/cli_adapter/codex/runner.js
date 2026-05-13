@@ -8,7 +8,7 @@ function isCodexTerminalEvent(event) {
 
 export function startCodexRun({
   workdir,
-  threadId,
+  sessionId,
   message,
   imagePaths = [],
   outputLastMessagePath = null,
@@ -23,7 +23,7 @@ export function startCodexRun({
 }) {
   const args = buildCodexArgs({
     workdir,
-    threadId,
+    sessionId,
     message,
     imagePaths,
     outputLastMessagePath,

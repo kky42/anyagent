@@ -9,7 +9,7 @@ import { buildCodexArgs } from "../src/cli_adapter/codex/args.js";
 import { startCodexRun } from "../src/cli_adapter/codex/runner.js";
 import { TELEGRAM_OUTPUT_DEVELOPER_INSTRUCTIONS } from "../src/agent_adapter/telegram/output-instructions.js";
 
-test("buildCodexArgs uses exec for a fresh thread", () => {
+test("buildCodexArgs uses exec for a fresh session", () => {
   assert.deepEqual(buildCodexArgs({
     workdir: "/tmp/project",
     message: "hello"
@@ -25,10 +25,10 @@ test("buildCodexArgs uses exec for a fresh thread", () => {
   ]);
 });
 
-test("buildCodexArgs uses exec resume when thread id exists", () => {
+test("buildCodexArgs uses exec resume when session id exists", () => {
   assert.deepEqual(buildCodexArgs({
     workdir: "/tmp/project",
-    threadId: "thread-123",
+    sessionId: "session-123",
     message: "continue"
   }), [
     "exec",
@@ -39,7 +39,7 @@ test("buildCodexArgs uses exec resume when thread id exists", () => {
     "--sandbox",
     "workspace-write",
     "resume",
-    "thread-123",
+    "session-123",
     "continue"
   ]);
 });
@@ -134,7 +134,7 @@ test("buildCodexArgs appends model and reasoning-effort when provided", () => {
   ]);
 });
 
-test("buildCodexArgs appends image flags for a fresh thread", () => {
+test("buildCodexArgs appends image flags for a fresh session", () => {
   assert.deepEqual(buildCodexArgs({
     workdir: "/tmp/project",
     message: "",
@@ -156,7 +156,7 @@ test("buildCodexArgs appends image flags for a fresh thread", () => {
 test("buildCodexArgs appends image flags before exec resume", () => {
   assert.deepEqual(buildCodexArgs({
     workdir: "/tmp/project",
-    threadId: "thread-123",
+    sessionId: "session-123",
     message: "",
     imagePaths: ["/tmp/one.png"]
   }), [
@@ -169,7 +169,7 @@ test("buildCodexArgs appends image flags before exec resume", () => {
     "workspace-write",
     "--image=/tmp/one.png",
     "resume",
-    "thread-123",
+    "session-123",
     ""
   ]);
 });
@@ -195,7 +195,7 @@ test("buildCodexArgs supports ephemeral last-message capture runs", () => {
   ]);
 });
 
-test("buildCodexArgs injects developer_instructions only for fresh threads", () => {
+test("buildCodexArgs injects developer_instructions only for fresh sessions", () => {
   const freshArgs = buildCodexArgs({
     workdir: "/tmp/project",
     message: "hello",
@@ -203,7 +203,7 @@ test("buildCodexArgs injects developer_instructions only for fresh threads", () 
   });
   const resumedArgs = buildCodexArgs({
     workdir: "/tmp/project",
-    threadId: "thread-123",
+    sessionId: "session-123",
     message: "hello",
     developerInstructions: TELEGRAM_OUTPUT_DEVELOPER_INSTRUCTIONS
   });

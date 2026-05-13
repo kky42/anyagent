@@ -62,8 +62,8 @@ HTTP_PROXY=http://127.0.0.1:7890 HTTPS_PROXY=http://127.0.0.1:7890 npm start
   - `developer_instructions` is injected as an additional developer message for that turn and affects model behavior immediately.
   - `instructions` did not show a meaningful effect in the current CLI version and should be treated as reserved for future use.
   - `model_instructions_file` is heavier-weight: it can override the normal model-instructions / `AGENTS.md` layer. Do not use it for the relay's Telegram formatting policy.
-- For this relay, inject `developer_instructions` only when starting a fresh Codex thread.
-- Do not resend `developer_instructions` on `codex exec resume` for an already-bootstrapped thread.
+- For this relay, inject `developer_instructions` only when starting a fresh Codex session.
+- Do not resend `developer_instructions` on `codex exec resume` for an already-bootstrapped session.
 
 ## Release Automation
 

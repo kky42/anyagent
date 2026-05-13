@@ -16,12 +16,15 @@ function getDefaultCodexSessionsDir() {
   return path.join(os.homedir(), ".codex", "sessions");
 }
 
-export async function findCodexRolloutPathForThread(threadId, { sessionsDir = getDefaultCodexSessionsDir() } = {}) {
-  if (!threadId) {
+export async function findCodexRolloutPathForSession(
+  sessionId,
+  { sessionsDir = getDefaultCodexSessionsDir() } = {}
+) {
+  if (!sessionId) {
     return null;
   }
 
-  const cached = CODEX_ROLLOUT_PATH_CACHE.get(threadId);
+  const cached = CODEX_ROLLOUT_PATH_CACHE.get(sessionId);
   if (cached) {
     try {
       const stat = await fs.stat(cached);
@@ -29,7 +32,7 @@ export async function findCodexRolloutPathForThread(threadId, { sessionsDir = ge
         return cached;
       }
     } catch {
-      CODEX_ROLLOUT_PATH_CACHE.delete(threadId);
+      CODEX_ROLLOUT_PATH_CACHE.delete(sessionId);
     }
   }
 
@@ -61,7 +64,7 @@ export async function findCodexRolloutPathForThread(threadId, { sessionsDir = ge
       if (!entry.name.startsWith("rollout-") || !entry.name.endsWith(".jsonl")) {
         continue;
       }
-      if (!entry.name.includes(threadId)) {
+      if (!entry.name.includes(sessionId)) {
         continue;
       }
 
@@ -106,7 +109,7 @@ export async function findCodexRolloutPathForThread(threadId, { sessionsDir = ge
         if (!entry.name.startsWith("rollout-") || !entry.name.endsWith(".jsonl")) {
           continue;
         }
-        if (!entry.name.includes(threadId)) {
+        if (!entry.name.includes(sessionId)) {
           continue;
         }
 
@@ -130,7 +133,7 @@ export async function findCodexRolloutPathForThread(threadId, { sessionsDir = ge
 
   matches.sort((left, right) => right.mtimeMs - left.mtimeMs);
   const bestPath = matches[0].fullPath;
-  CODEX_ROLLOUT_PATH_CACHE.set(threadId, bestPath);
+  CODEX_ROLLOUT_PATH_CACHE.set(sessionId, bestPath);
   return bestPath;
 }
 
@@ -228,8 +231,8 @@ export async function readCodexFinalCallTokenUsageFromRollout(rolloutPath) {
   }
 }
 
-export async function readContextLengthForThread(threadId, options) {
-  const rolloutPath = await findCodexRolloutPathForThread(threadId, options);
+export async function readContextLengthForSession(sessionId, options) {
+  const rolloutPath = await findCodexRolloutPathForSession(sessionId, options);
   if (!rolloutPath) {
     return null;
   }

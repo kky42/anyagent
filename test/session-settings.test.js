@@ -26,7 +26,7 @@ test("/workdir expands ~/ paths and updates the current session only", async () 
   await session.handleWorkdir("~/Desktop");
 
   assert.equal(session.workdir, desktopDir);
-  assert.equal(session.threadId, null);
+  assert.equal(session.sessionId, null);
   assert.equal(session.contextLength, null);
   assert.equal(configStore.patches.length, 0);
   assert.match(fakeBotApi.messages.at(-1).text, /Started a new session/);
@@ -44,11 +44,11 @@ test("/workdir rejects invalid paths", async () => {
 
 test("/workdir is a no-op when the normalized path matches the current workdir", async () => {
   const { session, fakeBotApi, configStore } = await createSession();
-  await session.updateThreadId("thread-old");
+  await session.updateSessionId("session-old");
 
   await session.handleWorkdir("/tmp/project");
 
-  assert.equal(session.threadId, "thread-old");
+  assert.equal(session.sessionId, "session-old");
   assert.equal(session.workdir, "/tmp/project");
   assert.equal(configStore.patches.length, 0);
   assert.equal(fakeBotApi.messages.at(-1).text, "Workdir is already set to /tmp/project.");
@@ -57,7 +57,7 @@ test("/workdir is a no-op when the normalized path matches the current workdir",
 test("/workdir aborts the active run, clears the queue, and uses the new workdir on the next run", async () => {
   const nextWorkdir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-workdir-"));
   const { session, runnerFactory } = await createSession();
-  await session.updateThreadId("thread-old");
+  await session.updateSessionId("session-old");
 
   await session.enqueueMessage("first");
   await session.enqueueMessage("second");
@@ -67,12 +67,12 @@ test("/workdir aborts the active run, clears the queue, and uses the new workdir
 
   assert.equal(runnerFactory.runs[0].aborted, true);
   assert.equal(session.queue.length, 0);
-  assert.equal(session.threadId, null);
+  assert.equal(session.sessionId, null);
   assert.equal(session.workdir, nextWorkdir);
 
   await session.enqueueMessage("after switch");
   assert.equal(runnerFactory.runs.at(-1).params.workdir, nextWorkdir);
-  assert.equal(runnerFactory.runs.at(-1).params.threadId, null);
+  assert.equal(runnerFactory.runs.at(-1).params.sessionId, null);
 });
 
 test("status shows the latest context length", async () => {
@@ -142,7 +142,7 @@ test("/reset reloads config defaults, clears chat overrides, and starts a new se
   await session.handleAuto("medium");
   await session.handleModel("default");
   await session.handleReasoningEffort("xhigh");
-  await session.updateThreadId("thread-old");
+  await session.updateSessionId("session-old");
   await session.updateContextLength(1200);
 
   configStore.loadedBotConfig = {
@@ -165,7 +165,7 @@ test("/reset reloads config defaults, clears chat overrides, and starts a new se
   assert.equal(session.auto, "high");
   assert.equal(session.model, "gpt-5.4-mini");
   assert.equal(session.reasoningEffort, "high");
-  assert.equal(session.threadId, null);
+  assert.equal(session.sessionId, null);
   assert.equal(session.contextLength, null);
   assert.equal(configStore.loads.length, 1);
   assert.equal(
@@ -178,12 +178,12 @@ test("/reset leaves the session untouched when config reload fails", async () =>
   const configStore = new FakeConfigStore();
   configStore.loadFailure = new Error("config parse failed");
   const { session, fakeBotApi } = await createSession({ configStore });
-  await session.updateThreadId("thread-old");
+  await session.updateSessionId("session-old");
   await session.updateContextLength(1200);
 
   await session.handleReset();
 
-  assert.equal(session.threadId, "thread-old");
+  assert.equal(session.sessionId, "session-old");
   assert.equal(session.contextLength, 1200);
   assert.equal(fakeBotApi.messages.at(-1).text, "Failed to reload bot config: config parse failed");
 });

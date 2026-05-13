@@ -101,23 +101,23 @@ Useful PM2 commands:
 - `/reasoning <value>` sets reasoning effort for future runs in the current chat. Use `/reasoning default` to return to CLI defaults.
 - `/reset` reloads the current agent config from disk, clears chat-specific overrides, and starts a fresh session for this chat.
 - `/clear_cache` deletes cached Telegram attachments for the current Telegram bot instance.
-- `/abort` interrupts Codex and clears the queued messages while keeping the current `threadId`.
-- `/new` interrupts Codex, clears queued messages, and drops the current chat's stored `threadId`.
+- `/abort` interrupts Codex and clears the queued messages while keeping the current `sessionId`.
+- `/new` interrupts Codex, clears queued messages, and drops the current chat's stored `sessionId`.
 
 ## Behavior
 
 - Only private chats are supported.
 - Startup discards pending Telegram updates so messages and slash commands sent while the relay was stopped are not processed after restart.
-- Each `(Telegram bot, chat)` pair has its own in-memory queue, `threadId`, and usage state.
+- Each `(Telegram bot, chat)` pair has its own in-memory queue, `sessionId`, and usage state.
 - Supported Telegram attachments are `photo`, `document`, `video`, `audio`, `voice`, and `animation`.
 - `photo` attachments are passed to `codex exec` natively with `--image`. Other supported attachments are downloaded to `~/.anyagent/cache/telegram/<bot-username>/c<base36-chat-id>/...` and passed to Codex by local file path in the prompt.
 - Captionless photo-only turns send an empty prompt plus one or more `--image` flags.
 - Telegram media albums are grouped by `media_group_id` and submitted as one logical Codex turn.
 - Attachments larger than 20 MB are rejected.
 - Fresh prompts use `codex exec --json --skip-git-repo-check`; continued prompts use `codex exec resume`.
-- Fresh interactive threads inject relay-specific `developer_instructions` that tell Codex to prefer Telegram HTML-compatible output.
-- The relay keeps `threadId` and the latest `context_length` in memory for the chat while the process is running.
-- `context_length` is derived from the final `token_count.last_token_usage` event in the thread's rollout file under `~/.codex/sessions/...`.
+- Fresh interactive sessions inject relay-specific `developer_instructions` that tell Codex to prefer Telegram HTML-compatible output.
+- The relay keeps `sessionId` and the latest `context_length` in memory for the chat while the process is running.
+- `context_length` is derived from the final `token_count.last_token_usage` event in the Codex rollout file under `~/.codex/sessions/...`.
 - Completed `agent_message` items become the visible final reply.
 - Non-message items such as `reasoning`, `web_search`, and `command_execution` reuse one in-flight Telegram message that is edited as progress changes.
 - Telegram sends replies with `HTML` parse mode first, then falls back to `MarkdownV2`, then plain text if parsing still fails.

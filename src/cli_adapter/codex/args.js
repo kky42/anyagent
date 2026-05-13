@@ -12,7 +12,7 @@ import {
 /**
  * @typedef {object} CodexRunRequest
  * @property {string} workdir
- * @property {string | null | undefined} [threadId]
+ * @property {string | null | undefined} [sessionId]
  * @property {string} message
  * @property {string[]} [imagePaths]
  * @property {string | null | undefined} [outputLastMessagePath]
@@ -32,7 +32,7 @@ function buildConfigOverrideArg(key, rawValue) {
  */
 export function buildCodexArgs({
   workdir,
-  threadId,
+  sessionId,
   message,
   imagePaths = [],
   outputLastMessagePath = null,
@@ -55,7 +55,7 @@ export function buildCodexArgs({
       ? []
       : ["-c", buildConfigOverrideArg("model_reasoning_effort", reasoningEffort)];
   const developerInstructionArgs =
-    !threadId && developerInstructions
+    !sessionId && developerInstructions
       ? ["-c", buildConfigOverrideArg("developer_instructions", developerInstructions)]
       : [];
 
@@ -74,8 +74,8 @@ export function buildCodexArgs({
     ...imagePaths.flatMap((imagePath) => [`--image=${imagePath}`])
   ];
 
-  if (threadId) {
-    return [...baseArgs, "resume", threadId, message];
+  if (sessionId) {
+    return [...baseArgs, "resume", sessionId, message];
   }
 
   return [...baseArgs, message];
