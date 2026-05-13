@@ -49,7 +49,6 @@ HTTP_PROXY=http://127.0.0.1:7890 HTTPS_PROXY=http://127.0.0.1:7890 npm start
 
 ## Relay Behavior Decisions
 
-- The relay uses `auto` levels instead of the previous two-state `yolo` mode.
 - Bot-level and chat-level `auto` values use three levels:
   - `low` => `codex exec --sandbox read-only`
   - `medium` => `codex exec --sandbox workspace-write`

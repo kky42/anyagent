@@ -34,9 +34,6 @@ export async function routeTextMessage({ text, botUsername, session, runtime }) 
     case "workdir":
       await session.handleWorkdir(parsedCommand.args);
       return;
-    case "yolo":
-      await session.sendText("Use /auto low, /auto medium, or /auto high.");
-      return;
     case "model":
       await session.handleModel(parsedCommand.args);
       return;

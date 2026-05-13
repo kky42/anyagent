@@ -131,6 +131,17 @@ test("runtime routes /auto, /model, and /reasoning to the current chat session",
   assert.equal(fakeBotApi.messages.at(-1).text, "Reasoning effort set to high.");
 });
 
+test("runtime treats unknown slash commands as normal prompts", async () => {
+  const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
+
+  await runtime.handleMessage(buildTextMessage("/unknown_command"));
+
+  assert.equal(fakeBotApi.messages.length, 0);
+  assert.equal(runnerFactory.runs.length, 1);
+  assert.equal(runnerFactory.runs[0].params.message, "/unknown_command");
+  runnerFactory.runs[0].finish();
+});
+
 test("runtime keeps separate sessions for different private chats", async () => {
   const { runtime } = await createRuntime({
     botConfig: {
