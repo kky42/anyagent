@@ -1,10 +1,3 @@
-/**
- * @typedef {object} CodexAction
- * @property {"session_started" | "turn_completed" | "progress" | "error" | "message"} kind
- * @property {string | null | undefined} [sessionId]
- * @property {string | undefined} [text]
- */
-
 export function parseJsonlLine(line) {
   const trimmed = String(line || "").trim();
   if (!trimmed) {
@@ -24,7 +17,7 @@ export function parseJsonlLine(line) {
 
 /**
  * @param {any} event
- * @returns {CodexAction[]}
+ * @returns {import("../types.js").CliAction[]}
  */
 export function eventToActions(event) {
   if (!event || typeof event !== "object") {

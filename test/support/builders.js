@@ -47,7 +47,9 @@ export async function createSession(options = {}) {
     logger: () => {},
     chatId: 1001,
     cacheRootDir,
-    createCodexRun: options.createCodexRun ?? ((params) => runnerFactory.createRun(params)),
+    createAgentRun:
+      options.createAgentRun ?? (options.createCodexRun ? undefined : ((params) => runnerFactory.createRun(params))),
+    createCodexRun: options.createCodexRun,
     resolveContextLength: options.resolveContextLength ?? (async () => 21300),
     resolveHomeDir: options.resolveHomeDir
   });
@@ -94,7 +96,9 @@ export async function createRuntime(options = {}) {
     botConfig,
     botApi: fakeBotApi,
     configStore,
-    createCodexRun: options.createCodexRun ?? ((params) => runnerFactory.createRun(params)),
+    createAgentRun:
+      options.createAgentRun ?? (options.createCodexRun ? undefined : ((params) => runnerFactory.createRun(params))),
+    createCodexRun: options.createCodexRun,
     cacheRootDir,
     albumQuietPeriodMs: options.albumQuietPeriodMs
   });

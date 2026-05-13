@@ -50,6 +50,55 @@ test("session queues incoming messages and resumes with the current session id",
   assert.equal(session.auto, "medium");
 });
 
+test("Claude session events update session id, context length, and resume", async () => {
+  const { session, runnerFactory } = await createSession({
+    agent: {
+      cli: "claude"
+    },
+    resolveContextLength: async () => null
+  });
+
+  await session.enqueueMessage("first");
+  assert.equal(runnerFactory.runs.length, 1);
+  assert.equal(runnerFactory.runs[0].params.sessionId, null);
+
+  await runnerFactory.runs[0].emit({
+    type: "system",
+    subtype: "init",
+    session_id: "9f4026da-cb03-4e1e-a75c-b3fa94f42156"
+  });
+  await runnerFactory.runs[0].emit({
+    type: "assistant",
+    message: {
+      content: [
+        {
+          type: "text",
+          text: "done"
+        }
+      ],
+      usage: {
+        input_tokens: 1000,
+        cache_creation_input_tokens: 5000,
+        cache_read_input_tokens: 200,
+        output_tokens: 50
+      }
+    }
+  });
+  await runnerFactory.runs[0].emit({
+    type: "result",
+    subtype: "success",
+    is_error: false
+  });
+  runnerFactory.runs[0].finish();
+
+  await waitFor(() => session.isRunning === false);
+  assert.equal(session.sessionId, "9f4026da-cb03-4e1e-a75c-b3fa94f42156");
+  assert.equal(session.contextLength, 1250);
+
+  await session.enqueueMessage("second");
+  assert.equal(runnerFactory.runs.at(-1).params.sessionId, "9f4026da-cb03-4e1e-a75c-b3fa94f42156");
+});
+
 test("abort clears queue but keeps the existing session id", async () => {
   const { session, fakeBotApi, runnerFactory } = await createSession();
   session.sessionId = "session-keep";

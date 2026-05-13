@@ -58,6 +58,33 @@ test("loadConfig loads agent profiles and telegram bindings", async () => {
   assert.equal(botConfig?.username, "relaybot");
 });
 
+test("loadConfig accepts Claude agent profiles", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-config-"));
+  const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-workdir-"));
+
+  await writeAgentConfig(tempDir, "primary", {
+    profile: {
+      cli: "claude",
+      workdir
+    },
+    bindings: {
+      telegram: {
+        bots: [
+          {
+            username: "RelayBot",
+            token: "token-1"
+          }
+        ]
+      }
+    }
+  });
+
+  const config = await loadConfig(tempDir);
+  assert.equal(config.agents[0].cli, "claude");
+  assert.equal(config.agents[0].workdir, workdir);
+  assert.equal(config.telegramBots[0].agent.cli, "claude");
+});
+
 test("loadConfig defaults profile values", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-config-"));
   const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-workdir-"));
@@ -115,7 +142,7 @@ test("loadConfig rejects unsupported agent cli values", async () => {
 
   await writeAgentConfig(tempDir, "primary", {
     profile: {
-      cli: "claude",
+      cli: "unknown-cli",
       workdir
     },
     bindings: {
@@ -130,7 +157,7 @@ test("loadConfig rejects unsupported agent cli values", async () => {
     }
   });
 
-  await assert.rejects(() => loadConfig(tempDir), /profile\.cli must be one of: codex/);
+  await assert.rejects(() => loadConfig(tempDir), /profile\.cli must be one of: codex, claude/);
 });
 
 test("loadConfig rejects duplicate Telegram bot usernames", async () => {

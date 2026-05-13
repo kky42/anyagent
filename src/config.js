@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { normalizeBotAuto } from "./auto-mode.js";
+import { SUPPORTED_AGENT_CLIS } from "./cli_adapter/index.js";
 import {
   normalizeBotModel,
   normalizeBotReasoningEffort
@@ -12,7 +13,7 @@ import {
   normalizeTelegramUsername
 } from "./utils.js";
 
-const SUPPORTED_AGENT_CLIS = new Set(["codex"]);
+const SUPPORTED_AGENT_CLI_SET = new Set(SUPPORTED_AGENT_CLIS);
 
 function assertObject(value, fieldPath) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -158,8 +159,8 @@ function normalizeAgentProfile(rawConfig, agentId, filePath) {
     throw new Error(`${filePath}.profile.cli must be a non-empty string`);
   }
   const cli = profile.cli.trim().toLowerCase();
-  if (!SUPPORTED_AGENT_CLIS.has(cli)) {
-    throw new Error(`${filePath}.profile.cli must be one of: codex`);
+  if (!SUPPORTED_AGENT_CLI_SET.has(cli)) {
+    throw new Error(`${filePath}.profile.cli must be one of: ${SUPPORTED_AGENT_CLIS.join(", ")}`);
   }
 
   const workdir = path.resolve(profile.workdir ?? os.homedir());

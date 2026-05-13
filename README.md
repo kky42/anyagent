@@ -2,9 +2,9 @@
 
 Run CLI coding agents from chat platforms.
 
-The current implementation ships one CLI adapter (`codex`) and one chat adapter
-(`telegram`). The internal layout is ready for additional CLI agents such as Claude Code
-and Pi, and additional chat platforms such as Mattermost.
+The current implementation ships CLI adapters for `codex` and `claude`, plus one chat
+adapter (`telegram`). The internal layout is ready for additional CLI agents such as Pi
+and additional chat platforms such as Mattermost.
 
 ![codex in telegram example](./assets/example.png)
 
@@ -26,7 +26,7 @@ keep into `~/.anyagent/agents/<agent-id>/config.json`.
 
 - CLI adapters live in `src/cli_adapter/<agent>/`.
 - Chat adapters live in `src/chat_adapter/<platform>/`.
-- Current adapters: `src/cli_adapter/codex/` and `src/chat_adapter/telegram/`.
+- Current adapters: `src/cli_adapter/codex/`, `src/cli_adapter/claude/`, and `src/chat_adapter/telegram/`.
 
 ## Config
 
@@ -59,10 +59,10 @@ Each agent lives in its own directory:
 
 Notes:
 
-- `profile.cli` is currently `codex`.
+- `profile.cli` can be `codex` or `claude`.
 - `profile.workdir` is optional. If omitted, the relay uses your home directory. It must already exist.
 - `profile.auto` defaults to `medium`.
-- `profile.model` and `profile.reasoningEffort` default to `default`, which means the relay does not pass an override to `codex exec`.
+- `profile.model` and `profile.reasoningEffort` default to `default`, which means the relay does not pass a CLI-specific override.
 - `bindings.telegram.allowedUsernames` and bot usernames accept values with or without `@` and are normalized to lowercase.
 - If you do not know your Telegram username, send the bot any message once. The unauthorized reply shows the normalized username to add.
 - A single agent directory can bind to multiple Telegram bots, and the same agent profile can be reused by multiple chat platforms later.
@@ -101,8 +101,8 @@ Useful PM2 commands:
 - `/reasoning <value>` sets reasoning effort for future runs in the current chat. Use `/reasoning default` to return to CLI defaults.
 - `/reset` reloads the current agent config from disk, clears chat-specific overrides, and starts a fresh session for this chat.
 - `/clear_cache` deletes cached Telegram attachments for the current Telegram bot instance.
-- `/abort` interrupts Codex and clears the queued messages while keeping the current `sessionId`.
-- `/new` interrupts Codex, clears queued messages, and drops the current chat's stored `sessionId`.
+- `/abort` interrupts the active agent run and clears the queued messages while keeping the current `sessionId`.
+- `/new` interrupts the active agent run, clears queued messages, and drops the current chat's stored `sessionId`.
 
 ## Behavior
 
@@ -110,18 +110,21 @@ Useful PM2 commands:
 - Startup discards pending Telegram updates so messages and slash commands sent while the relay was stopped are not processed after restart.
 - Each `(Telegram bot, chat)` pair has its own in-memory queue, `sessionId`, and usage state.
 - Supported Telegram attachments are `photo`, `document`, `video`, `audio`, `voice`, and `animation`.
-- `photo` attachments are passed to `codex exec` natively with `--image`. Other supported attachments are downloaded to `~/.anyagent/cache/telegram/<bot-username>/c<base36-chat-id>/...` and passed to Codex by local file path in the prompt.
-- Captionless photo-only turns send an empty prompt plus one or more `--image` flags.
-- Telegram media albums are grouped by `media_group_id` and submitted as one logical Codex turn.
+- `photo` attachments are passed to Codex natively with `--image`. Claude receives downloaded photo paths in the prompt, the same way non-image attachments are referenced.
+- Other supported attachments are downloaded to `~/.anyagent/cache/telegram/<bot-username>/c<base36-chat-id>/...` and passed to the agent by local file path in the prompt.
+- Captionless Codex photo-only turns send an empty prompt plus one or more `--image` flags. Claude photo-only turns send an attachment path block.
+- Telegram media albums are grouped by `media_group_id` and submitted as one logical agent turn.
 - Attachments larger than 20 MB are rejected.
-- Fresh prompts use `codex exec --json --skip-git-repo-check`; continued prompts use `codex exec resume`.
-- Fresh interactive sessions inject only a relay attachment contract using `<attachments>` XML blocks; Telegram-specific formatting is handled by the relay.
+- Codex fresh prompts use `codex exec --json --skip-git-repo-check`; continued prompts use `codex exec resume`.
+- Claude fresh prompts use `claude -p --output-format stream-json`; continued prompts use `claude -p --output-format stream-json --resume <session-id>`.
+- The relay maps `auto` to each CLI's permission model. Codex uses `read-only`, `workspace-write`, or dangerous bypass. Claude uses `dontAsk`, `acceptEdits`, or `--dangerously-skip-permissions`.
+- Fresh interactive sessions inject only a relay attachment contract using `<attachments>` XML blocks; Telegram-specific formatting is handled by the relay. Claude receives this contract through `--append-system-prompt`.
 - The relay keeps `sessionId` and the latest `context_length` in memory for the chat while the process is running.
-- `context_length` is derived from the final `token_count.last_token_usage` event in the Codex rollout file under `~/.codex/sessions/...`.
-- Completed `agent_message` items become the visible final reply.
+- Codex `context_length` is derived from the final `token_count.last_token_usage` event in the Codex rollout file under `~/.codex/sessions/...`. Claude `context_length` is derived from the streamed result usage.
+- Completed Codex `agent_message` items and Claude text response events become the visible final reply.
 - Non-message items such as `reasoning`, `web_search`, and `command_execution` reuse one in-flight Telegram message that is edited as progress changes.
-- Telegram converts Codex Markdown replies to Telegram-safe HTML, sends with `HTML` parse mode first, then falls back to `MarkdownV2` or plain text if parsing still fails.
+- Telegram converts agent Markdown replies to Telegram-safe HTML, sends with `HTML` parse mode first, then falls back to `MarkdownV2` or plain text if parsing still fails.
 - Slash commands that change settings only affect the invoking chat session.
 - `/clear_cache` is bot-wide. It clears only `~/.anyagent/cache/telegram/<bot-username>/` and refuses to run while turns or media albums are pending.
-- `/workdir <path>` only affects the invoking chat, aborts its current run, clears that chat's queue, and resets that chat to a fresh Codex session.
+- `/workdir <path>` only affects the invoking chat, aborts its current run, clears that chat's queue, and resets that chat to a fresh agent session.
 - `/abort` affects only the interactive run and queue for the current chat.

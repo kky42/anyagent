@@ -167,6 +167,29 @@ test("runtime keeps separate sessions for different private chats", async () => 
   assert.equal(sessionB.workdir, "/tmp/project");
 });
 
+test("runtime creates Claude-backed chat sessions from agent profile", async () => {
+  const { runtime, runnerFactory } = await createRuntime({
+    botConfig: {
+      agent: {
+        id: "claude-agent",
+        cli: "claude",
+        workdir: "/tmp/project",
+        auto: "medium",
+        model: "default",
+        reasoningEffort: "default"
+      }
+    }
+  });
+
+  await runtime.handleMessage(buildTextMessage("hello"));
+
+  const session = runtime.sessionFor(1001);
+  assert.equal(session.cliAdapter.id, "claude");
+  assert.equal(runnerFactory.runs.length, 1);
+  assert.equal(runnerFactory.runs[0].params.message, "hello");
+  runnerFactory.runs[0].finish();
+});
+
 test("runtime routes /reset to the current chat session only", async () => {
   const nextWorkdir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-reset-"));
   const { runtime, fakeBotApi, configStore } = await createRuntime({

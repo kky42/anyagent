@@ -1,4 +1,4 @@
-import { startCodexRun } from "../../cli_adapter/codex/runner.js";
+import { cliAdapterFor } from "../../cli_adapter/index.js";
 import { DEFAULT_CACHE_PATH, normalizeTelegramUsername, sleep, toErrorMessage } from "../../utils.js";
 import { ALBUM_QUIET_PERIOD_MS, hasSupportedAttachment, unsupportedAttachmentMessage } from "./attachments.js";
 import { ChatSession } from "./chat-session.js";
@@ -8,9 +8,9 @@ import { NOOP_CONFIG_STORE } from "./session-persistence.js";
 import { TelegramApiError, TelegramBotApi } from "./telegram-api.js";
 
 export const TELEGRAM_COMMANDS = [
-  { command: "status", description: "Show current Codex status" },
+  { command: "status", description: "Show current agent status" },
   { command: "workdir", description: "Show or change the bot workdir" },
-  { command: "auto", description: "Set Codex automation level for this chat" },
+  { command: "auto", description: "Set agent automation level for this chat" },
   { command: "model", description: "Set model for future runs" },
   { command: "reasoning", description: "Set reasoning effort for future runs" },
   { command: "clear_cache", description: "Clear cached attachments for this bot" },
@@ -34,14 +34,16 @@ export class BotRuntime {
     configStore = NOOP_CONFIG_STORE,
     fetchImpl = globalThis.fetch,
     botApi = null,
-    createCodexRun = startCodexRun,
+    createAgentRun = null,
+    createCodexRun = null,
     cacheRootDir = DEFAULT_CACHE_PATH,
     albumQuietPeriodMs = ALBUM_QUIET_PERIOD_MS
   }) {
     this.botConfig = botConfig;
     this.configStore = configStore;
     this.botApi = botApi ?? new TelegramBotApi(botConfig.token, fetchImpl);
-    this.createCodexRun = createCodexRun;
+    this.createAgentRun =
+      createAgentRun ?? createCodexRun ?? ((params) => cliAdapterFor(this.botConfig.agent?.cli).startRun(params));
     this.cacheRootDir = cacheRootDir;
     this.albumQuietPeriodMs = albumQuietPeriodMs;
     this.botUsername = null;
@@ -68,7 +70,7 @@ export class BotRuntime {
         logger: (message) => this.log(`${chatId}: ${message}`),
         chatId,
         cacheRootDir: this.cacheRootDir,
-        createCodexRun: this.createCodexRun
+        createAgentRun: this.createAgentRun
       });
       this.sessions.set(key, session);
     }

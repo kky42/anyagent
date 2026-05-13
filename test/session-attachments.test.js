@@ -36,6 +36,35 @@ test("session stages photo attachments and passes image paths to Codex", async (
   assert.equal(await fs.readFile(runnerFactory.runs[0].params.imagePaths[0], "utf8"), "jpg");
 });
 
+test("Claude sessions pass photo attachments as prompt path references", async () => {
+  const { session, fakeBotApi, runnerFactory } = await createSession({
+    agent: {
+      cli: "claude"
+    }
+  });
+  fakeBotApi.registerFile("photo-1", {
+    filePath: "photos/input.jpg",
+    body: Buffer.from("jpg")
+  });
+
+  await session.handleAttachmentMessages([
+    {
+      message_id: 12,
+      caption: "inspect",
+      photo: [
+        { file_id: "photo-1", file_unique_id: "large", file_size: 3, width: 100, height: 100 }
+      ]
+    }
+  ]);
+
+  assert.equal(runnerFactory.runs.length, 1);
+  assert.deepEqual(runnerFactory.runs[0].params.imagePaths, []);
+  assert.match(runnerFactory.runs[0].params.message, /inspect/);
+  assert.match(runnerFactory.runs[0].params.message, /<attachments>/);
+  assert.match(runnerFactory.runs[0].params.message, /kind=photo path=/);
+  assert.match(runnerFactory.runs[0].params.message, /msg12\.jpg/);
+});
+
 test("session builds attachment prompts for path-based files", async () => {
   const { session, fakeBotApi, runnerFactory } = await createSession();
   fakeBotApi.registerFile("doc-1", {

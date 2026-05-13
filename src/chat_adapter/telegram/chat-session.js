@@ -8,10 +8,7 @@ import {
   buildAttachmentFileName
 } from "./attachments.js";
 import { formatAuto, parseAutoArgument } from "../../auto-mode.js";
-import { buildCodexArgs } from "../../cli_adapter/codex/args.js";
-import { readContextLengthForSession } from "../../cli_adapter/codex/context-length.js";
-import { eventToActions } from "../../cli_adapter/codex/events.js";
-import { startCodexRun } from "../../cli_adapter/codex/runner.js";
+import { cliAdapterFor } from "../../cli_adapter/index.js";
 import { buildTurnInputMessage } from "../../cli_adapter/turn-input.js";
 import { ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS } from "../output-instructions.js";
 import { renderStatusMessage } from "./render.js";
@@ -49,11 +46,13 @@ export class ChatSession {
     logger,
     chatId,
     cacheRootDir = DEFAULT_CACHE_PATH,
-    createCodexRun = startCodexRun,
-    resolveContextLength = readContextLengthForSession,
+    createAgentRun = null,
+    createCodexRun = null,
+    resolveContextLength = null,
     resolveHomeDir
   }) {
     this.botConfig = botConfig;
+    this.cliAdapter = cliAdapterFor(botConfig.agent?.cli);
     this.botApi = botApi;
     this.configStore = configStore;
     this.logger = logger;
@@ -63,8 +62,11 @@ export class ChatSession {
     this.isRunning = false;
     this.activeRun = null;
     this.typingTimer = null;
-    this.createCodexRun = createCodexRun;
-    this.resolveContextLength = resolveContextLength;
+    this.usesDefaultRunFactory = !createAgentRun && !createCodexRun;
+    this.createAgentRun =
+      createAgentRun ?? createCodexRun ?? ((params) => this.cliAdapter.startRun(params));
+    this.usesDefaultContextLengthResolver = !resolveContextLength;
+    this.resolveContextLength = resolveContextLength ?? this.cliAdapter.resolveContextLength;
     this.resolveHomeDir = resolveHomeDir;
     this.messageRenderer = new MessageRenderer({ botApi, chatId });
     this.persistence = new SessionPersistence({
@@ -381,7 +383,7 @@ export class ChatSession {
     await this.clearPersistedState();
 
     await this.sendText(
-      `Workdir set to ${nextWorkdir}. Started a new session. The next message will open a fresh Codex session.`
+      `Workdir set to ${nextWorkdir}. Started a new session. The next message will open a fresh ${this.cliAdapter.displayName} session.`
     );
   }
 
@@ -508,7 +510,9 @@ export class ChatSession {
 
   async handleNewSession() {
     await resetSession(this, { clearPersistedState: true });
-    await this.sendText("Started a new session. The next message will open a fresh Codex session.");
+    await this.sendText(
+      `Started a new session. The next message will open a fresh ${this.cliAdapter.displayName} session.`
+    );
   }
 
   async handleReset() {
@@ -526,6 +530,13 @@ export class ChatSession {
     await prepareForSessionReset(this);
     this.botConfig.allowedUsernames = reloadedBotConfig.allowedUsernames;
     this.botConfig.agent = reloadedBotConfig.agent;
+    this.cliAdapter = cliAdapterFor(this.botConfig.agent?.cli);
+    if (this.usesDefaultRunFactory) {
+      this.createAgentRun = (params) => this.cliAdapter.startRun(params);
+    }
+    if (this.usesDefaultContextLengthResolver) {
+      this.resolveContextLength = this.cliAdapter.resolveContextLength;
+    }
     await this.resetChatToBotDefaults();
 
     await this.sendText(
@@ -573,11 +584,23 @@ export class ChatSession {
     let emittedError = false;
     let currentSessionId = this.sessionId;
     let completedTurn = false;
-    const imagePaths = nextTurn.attachments
-      .filter((attachment) => attachment.mode === "native-image")
-      .map((attachment) => attachment.localPath);
-    const message = buildTurnInputMessage(nextTurn);
-    const debugArgs = buildCodexArgs({
+    const imagePaths = this.cliAdapter.supportsNativeImages
+      ? nextTurn.attachments
+        .filter((attachment) => attachment.mode === "native-image")
+        .map((attachment) => attachment.localPath)
+      : [];
+    const messageTurn = this.cliAdapter.supportsNativeImages
+      ? nextTurn
+      : {
+        ...nextTurn,
+        attachments: nextTurn.attachments.map((attachment) =>
+          attachment.mode === "native-image"
+            ? { ...attachment, mode: "path-reference" }
+            : attachment
+        )
+      };
+    const message = buildTurnInputMessage(messageTurn);
+    const debugArgs = this.cliAdapter.buildArgs({
       workdir: this.workdir,
       sessionId: this.sessionId,
       message,
@@ -592,7 +615,7 @@ export class ChatSession {
       redactedArgs[redactedArgs.length - 1] = `<prompt:${message.length}>`;
     }
     this.logger(
-      `starting codex run ${JSON.stringify({
+      `starting ${this.cliAdapter.id} run ${JSON.stringify({
         sessionId: this.sessionId,
         attachments: nextTurn.attachments.map((attachment) => ({
           kind: attachment.kind,
@@ -603,7 +626,7 @@ export class ChatSession {
       })}`
     );
 
-    const run = this.createCodexRun({
+    const run = this.createAgentRun({
       workdir: this.workdir,
       sessionId: this.sessionId,
       message,
@@ -613,7 +636,7 @@ export class ChatSession {
       reasoningEffort: this.reasoningEffort,
       developerInstructions: ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS,
       onEvent: async (event) => {
-        const actions = eventToActions(event);
+        const actions = this.cliAdapter.eventToActions(event);
         for (const action of actions) {
           if (action.kind === "session_started" && action.sessionId) {
             currentSessionId = action.sessionId;
@@ -622,6 +645,10 @@ export class ChatSession {
           }
           if (action.kind === "turn_completed") {
             completedTurn = true;
+            continue;
+          }
+          if (action.kind === "context_length") {
+            await this.updateContextLength(action.contextLength);
             continue;
           }
           if (action.kind === "progress") {
@@ -641,7 +668,7 @@ export class ChatSession {
       onStdErr: (chunk) => {
         const message = chunk.trim();
         if (message) {
-          this.logger(`codex stderr: ${message}`);
+          this.logger(`${this.cliAdapter.id} stderr: ${message}`);
         }
       }
     });
@@ -655,16 +682,18 @@ export class ChatSession {
       }
       if (completedTurn && currentSessionId) {
         const contextLength = await this.resolveContextLength(currentSessionId);
-        await this.updateContextLength(contextLength);
+        if (contextLength !== null && contextLength !== undefined) {
+          await this.updateContextLength(contextLength);
+        }
       }
       if (completedTurn) {
         await this.clearProgressMessage();
       }
       if (!result.sawTerminalEvent && !emittedError) {
-        await this.renderErrorText("Codex exited without a terminal JSON event.");
+        await this.renderErrorText(`${this.cliAdapter.displayName} exited without a terminal JSON event.`);
       }
     } catch (error) {
-      await this.renderErrorText(`Codex process error: ${toErrorMessage(error)}`);
+      await this.renderErrorText(`${this.cliAdapter.displayName} process error: ${toErrorMessage(error)}`);
     } finally {
       this.activeRun = null;
       this.isRunning = false;

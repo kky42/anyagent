@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","cwd":"/workspace/test","session_id":"9f4026da-cb03-4e1e-a75c-b3fa94f42156","permissionMode":"acceptEdits"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","id":"toolu_1","input":{"command":"pwd"}}],"usage":{"input_tokens":1200,"cache_creation_input_tokens":9000,"cache_read_input_tokens":28000,"output_tokens":34}}}
+{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"hidden"},{"type":"text","text":"Hello from Claude"}],"usage":{"input_tokens":277,"cache_creation_input_tokens":9000,"cache_read_input_tokens":29056,"output_tokens":97}}}
+{"type":"result","subtype":"success","is_error":false,"session_id":"9f4026da-cb03-4e1e-a75c-b3fa94f42156","usage":{"input_tokens":1,"cache_read_input_tokens":2,"output_tokens":3}}

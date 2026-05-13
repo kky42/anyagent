@@ -7,15 +7,17 @@ function hasChildExited(child) {
 export function startCliJsonRun({
   command,
   args,
+  cwd = process.cwd(),
   displayName = command,
   parseEventLine,
   isTerminalEvent,
+  resolveNonZeroTerminalEvent = false,
   forceKillDelayMs = 3000,
   onEvent = async () => {},
   onStdErr = () => {}
 }) {
   const child = spawn(command, args, {
-    cwd: process.cwd(),
+    cwd,
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -71,7 +73,7 @@ export function startCliJsonRun({
         return;
       }
 
-      if (code === 0) {
+      if (code === 0 || (resolveNonZeroTerminalEvent && sawTerminalEvent)) {
         resolve({ code, signal, aborted: false, sawTerminalEvent });
         return;
       }
