@@ -6,6 +6,14 @@
   "bin": {
     "anyagent": "bin/anyagent.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/kky42/anyagent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kky42/anyagent/issues"
+  },
+  "homepage": "https://github.com/kky42/anyagent#readme",
   "files": [
     "bin",
     "src",
