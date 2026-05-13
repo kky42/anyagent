@@ -2,7 +2,7 @@
 
 Run CLI coding agents from chat platforms.
 
-The current implementation ships one CLI adapter (`codex`) and one chat platform adapter
+The current implementation ships one CLI adapter (`codex`) and one chat adapter
 (`telegram`). The internal layout is ready for additional CLI agents such as Claude Code
 and Pi, and additional chat platforms such as Mattermost.
 
@@ -25,8 +25,8 @@ keep into `~/.anyagent/agents/<agent-id>/config.json`.
 ## Adapter Layout
 
 - CLI adapters live in `src/cli_adapter/<agent>/`.
-- Chat platform adapters live in `src/agent_adapter/<platform>/`.
-- Current adapters: `src/cli_adapter/codex/` and `src/agent_adapter/telegram/`.
+- Chat adapters live in `src/chat_adapter/<platform>/`.
+- Current adapters: `src/cli_adapter/codex/` and `src/chat_adapter/telegram/`.
 
 ## Config
 

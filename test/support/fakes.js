@@ -1,4 +1,4 @@
-import { TelegramApiError } from "../../src/agent_adapter/telegram/telegram-api.js";
+import { TelegramApiError } from "../../src/chat_adapter/telegram/telegram-api.js";
 
 export class FakeBotApi {
   constructor({

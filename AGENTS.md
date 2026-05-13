@@ -34,10 +34,10 @@ HTTP_PROXY=http://127.0.0.1:7890 HTTPS_PROXY=http://127.0.0.1:7890 npm start
 
 - The package and CLI are named `anyagent`.
 - CLI-agent adapters live under `src/cli_adapter/<agent>/`.
-- Chat platform adapters live under `src/agent_adapter/<platform>/`.
-- The current concrete adapters are `src/cli_adapter/codex/` and `src/agent_adapter/telegram/`.
+- Chat adapters live under `src/chat_adapter/<platform>/`.
+- The current concrete adapters are `src/cli_adapter/codex/` and `src/chat_adapter/telegram/`.
 - Keep Codex-specific command construction, event decoding, and context-length logic inside the Codex CLI adapter.
-- Keep Telegram Bot API calls, Telegram command routing, Telegram rendering, Telegram attachment handling, and Telegram output instructions inside the Telegram agent adapter.
+- Keep Telegram Bot API calls, Telegram command routing, Telegram rendering, Telegram attachment handling, and Telegram output instructions inside the Telegram chat adapter.
 - Do not add root-level compatibility shims for old module locations.
 
 ## Secrets And Local Config

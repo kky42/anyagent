@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { TelegramBotApi, TelegramApiError } from "../src/agent_adapter/telegram/telegram-api.js";
+import { TelegramBotApi, TelegramApiError } from "../src/chat_adapter/telegram/telegram-api.js";
 
 test("editMessageText sends the Telegram edit payload", async () => {
   const calls = [];

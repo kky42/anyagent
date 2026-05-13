@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
-import { ChatSession } from "../src/agent_adapter/telegram/chat-session.js";
+import { ChatSession } from "../src/chat_adapter/telegram/chat-session.js";
 import { readContextLengthForThread } from "../src/cli_adapter/codex/context-length.js";
 import { startCodexRun } from "../src/cli_adapter/codex/runner.js";
 import { StateStore } from "../src/state-store.js";

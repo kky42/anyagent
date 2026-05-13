@@ -1,6 +1,6 @@
 import process from "node:process";
 
-import { BotRuntime } from "./agent_adapter/telegram/bot-runtime.js";
+import { BotRuntime } from "./chat_adapter/telegram/bot-runtime.js";
 import { ConfigStore } from "./config-store.js";
 import { loadConfig } from "./config.js";
 import { DEFAULT_CONFIG_PATH, toErrorMessage } from "./utils.js";

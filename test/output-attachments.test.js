@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {
   parseTelegramOutput,
   parseTelegramOutputSegments
-} from "../src/agent_adapter/telegram/output-attachments.js";
+} from "../src/chat_adapter/telegram/output-attachments.js";
 
 test("parseTelegramOutputSegments returns a single text segment when no control block exists", () => {
   assert.deepEqual(parseTelegramOutputSegments("plain text"), [

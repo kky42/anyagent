@@ -2,8 +2,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { BotRuntime } from "../../src/agent_adapter/telegram/bot-runtime.js";
-import { ChatSession } from "../../src/agent_adapter/telegram/chat-session.js";
+import { BotRuntime } from "../../src/chat_adapter/telegram/bot-runtime.js";
+import { ChatSession } from "../../src/chat_adapter/telegram/chat-session.js";
 import { createControlledRunnerFactory, FakeBotApi, FakeConfigStore } from "./fakes.js";
 
 export async function createSession(options = {}) {

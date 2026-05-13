@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 
 import { buildCodexArgs } from "../src/cli_adapter/codex/args.js";
 import { startCodexRun } from "../src/cli_adapter/codex/runner.js";
-import { TELEGRAM_OUTPUT_DEVELOPER_INSTRUCTIONS } from "../src/agent_adapter/telegram/output-instructions.js";
+import { TELEGRAM_OUTPUT_DEVELOPER_INSTRUCTIONS } from "../src/chat_adapter/telegram/output-instructions.js";
 
 test("buildCodexArgs uses exec for a fresh session", () => {
   assert.deepEqual(buildCodexArgs({
