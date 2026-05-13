@@ -115,12 +115,12 @@ Useful PM2 commands:
 - Telegram media albums are grouped by `media_group_id` and submitted as one logical Codex turn.
 - Attachments larger than 20 MB are rejected.
 - Fresh prompts use `codex exec --json --skip-git-repo-check`; continued prompts use `codex exec resume`.
-- Fresh interactive sessions inject relay-specific `developer_instructions` that tell Codex to prefer Telegram HTML-compatible output.
+- Fresh interactive sessions inject only a relay attachment contract using `<attachments>` XML blocks; Telegram-specific formatting is handled by the relay.
 - The relay keeps `sessionId` and the latest `context_length` in memory for the chat while the process is running.
 - `context_length` is derived from the final `token_count.last_token_usage` event in the Codex rollout file under `~/.codex/sessions/...`.
 - Completed `agent_message` items become the visible final reply.
 - Non-message items such as `reasoning`, `web_search`, and `command_execution` reuse one in-flight Telegram message that is edited as progress changes.
-- Telegram sends replies with `HTML` parse mode first, then falls back to `MarkdownV2`, then plain text if parsing still fails.
+- Telegram converts Codex Markdown replies to Telegram-safe HTML, sends with `HTML` parse mode first, then falls back to `MarkdownV2` or plain text if parsing still fails.
 - Slash commands that change settings only affect the invoking chat session.
 - `/clear_cache` is bot-wide. It clears only `~/.anyagent/cache/telegram/<bot-username>/` and refuses to run while turns or media albums are pending.
 - `/workdir <path>` only affects the invoking chat, aborts its current run, clears that chat's queue, and resets that chat to a fresh Codex session.

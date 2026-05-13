@@ -1,15 +1,24 @@
 import path from "node:path";
 
-import { SUPPORTED_ATTACHMENT_KINDS } from "./attachments.js";
+export const ATTACHMENTS_BLOCK_OPEN = "<attachments>";
+export const ATTACHMENTS_BLOCK_CLOSE = "</attachments>";
 
-export const TELEGRAM_ATTACHMENTS_BLOCK_OPEN = "<telegram-attachments>";
-export const TELEGRAM_ATTACHMENTS_BLOCK_CLOSE = "</telegram-attachments>";
+export const SUPPORTED_OUTBOUND_ATTACHMENT_KINDS = [
+  "photo",
+  "document",
+  "video",
+  "audio",
+  "voice",
+  "animation"
+];
 
 const OUTBOUND_IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png"]);
 const OUTBOUND_ANIMATION_EXTENSIONS = new Set([".gif"]);
 const OUTBOUND_VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".m4v", ".webm"]);
 const OUTBOUND_AUDIO_EXTENSIONS = new Set([".mp3", ".m4a", ".wav", ".flac", ".aac"]);
 const OUTBOUND_VOICE_EXTENSIONS = new Set([".ogg", ".opus"]);
+const ATTACHMENT_TAG_PATTERN = /<attachment\b([^<>]*?)\/>/g;
+const ATTRIBUTE_PATTERN = /\s+([A-Za-z_][A-Za-z0-9_.:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/gy;
 
 function normalizeOptionalString(value) {
   if (typeof value !== "string") {
@@ -18,6 +27,60 @@ function normalizeOptionalString(value) {
 
   const normalized = value.trim();
   return normalized || null;
+}
+
+function decodeXmlAttribute(text) {
+  const named = new Map([
+    ["amp", "&"],
+    ["lt", "<"],
+    ["gt", ">"],
+    ["quot", '"'],
+    ["apos", "'"]
+  ]);
+
+  return String(text ?? "").replace(/&(#x[0-9a-f]+|#\d+|[a-z][a-z0-9]+);/gi, (entity, body) => {
+    const key = String(body ?? "").toLowerCase();
+    if (key.startsWith("#x")) {
+      const code = Number.parseInt(key.slice(2), 16);
+      try {
+        return Number.isFinite(code) ? String.fromCodePoint(code) : entity;
+      } catch {
+        return entity;
+      }
+    }
+    if (key.startsWith("#")) {
+      const code = Number.parseInt(key.slice(1), 10);
+      try {
+        return Number.isFinite(code) ? String.fromCodePoint(code) : entity;
+      } catch {
+        return entity;
+      }
+    }
+    return named.get(key) ?? entity;
+  });
+}
+
+function parseXmlAttributes(rawAttributes) {
+  const attributes = {};
+  const raw = String(rawAttributes ?? "");
+  let cursor = 0;
+
+  while (cursor < raw.length) {
+    if (!raw.slice(cursor).trim()) {
+      return attributes;
+    }
+
+    ATTRIBUTE_PATTERN.lastIndex = cursor;
+    const match = ATTRIBUTE_PATTERN.exec(raw);
+    if (!match) {
+      return null;
+    }
+
+    attributes[match[1]] = decodeXmlAttribute(match[2] ?? match[3] ?? "");
+    cursor = ATTRIBUTE_PATTERN.lastIndex;
+  }
+
+  return attributes;
 }
 
 function inferAttachmentKind(filePath) {
@@ -52,7 +115,7 @@ function normalizeAttachmentKind(rawKind, filePath) {
   }
 
   const normalizedKind = rawKind.toLowerCase();
-  return SUPPORTED_ATTACHMENT_KINDS.includes(normalizedKind) ? normalizedKind : null;
+  return SUPPORTED_OUTBOUND_ATTACHMENT_KINDS.includes(normalizedKind) ? normalizedKind : null;
 }
 
 function normalizeOutboundEntry(entry) {
@@ -102,25 +165,29 @@ function normalizeOutboundEntry(entry) {
 
 function parseAttachmentBlock(rawBlock) {
   const innerText = rawBlock
-    .slice(TELEGRAM_ATTACHMENTS_BLOCK_OPEN.length, rawBlock.length - TELEGRAM_ATTACHMENTS_BLOCK_CLOSE.length)
-    .trim();
+    .slice(ATTACHMENTS_BLOCK_OPEN.length, rawBlock.length - ATTACHMENTS_BLOCK_CLOSE.length);
+  const entries = [];
+  let cursor = 0;
 
-  let parsed;
-  try {
-    parsed = JSON.parse(innerText);
-  } catch {
-    return null;
+  ATTACHMENT_TAG_PATTERN.lastIndex = 0;
+  let match;
+  while ((match = ATTACHMENT_TAG_PATTERN.exec(innerText)) !== null) {
+    if (innerText.slice(cursor, match.index).trim()) {
+      return null;
+    }
+
+    const attributes = parseXmlAttributes(match[1]);
+    if (!attributes) {
+      return null;
+    }
+
+    entries.push(normalizeOutboundEntry(attributes));
+    cursor = ATTACHMENT_TAG_PATTERN.lastIndex;
   }
 
-  const isObjectRecord =
-    parsed !== null && typeof parsed === "object" && !Array.isArray(parsed);
-  if (!Array.isArray(parsed) && !isObjectRecord) {
+  if (innerText.slice(cursor).trim()) {
     return null;
   }
-
-  const entries = (Array.isArray(parsed) ? parsed : [parsed]).map((entry) =>
-    normalizeOutboundEntry(entry)
-  );
 
   return {
     kind: "attachment_block",
@@ -140,21 +207,21 @@ function pushTextSegment(segments, text) {
   });
 }
 
-export function parseTelegramOutputSegments(text) {
+export function parseOutputSegments(text) {
   const rawText = String(text ?? "");
   const segments = [];
   let cursor = 0;
 
   while (cursor < rawText.length) {
-    const blockStart = rawText.indexOf(TELEGRAM_ATTACHMENTS_BLOCK_OPEN, cursor);
+    const blockStart = rawText.indexOf(ATTACHMENTS_BLOCK_OPEN, cursor);
     if (blockStart < 0) {
       pushTextSegment(segments, rawText.slice(cursor));
       break;
     }
 
     const blockClose = rawText.indexOf(
-      TELEGRAM_ATTACHMENTS_BLOCK_CLOSE,
-      blockStart + TELEGRAM_ATTACHMENTS_BLOCK_OPEN.length
+      ATTACHMENTS_BLOCK_CLOSE,
+      blockStart + ATTACHMENTS_BLOCK_OPEN.length
     );
     if (blockClose < 0) {
       pushTextSegment(segments, rawText.slice(cursor));
@@ -163,7 +230,7 @@ export function parseTelegramOutputSegments(text) {
 
     pushTextSegment(segments, rawText.slice(cursor, blockStart));
 
-    const blockEnd = blockClose + TELEGRAM_ATTACHMENTS_BLOCK_CLOSE.length;
+    const blockEnd = blockClose + ATTACHMENTS_BLOCK_CLOSE.length;
     const rawBlock = rawText.slice(blockStart, blockEnd);
     const parsedBlock = parseAttachmentBlock(rawBlock);
     if (parsedBlock) {
@@ -178,8 +245,8 @@ export function parseTelegramOutputSegments(text) {
   return segments;
 }
 
-export function parseTelegramOutput(text) {
-  const segments = parseTelegramOutputSegments(text);
+export function parseOutput(text) {
+  const segments = parseOutputSegments(text);
 
   return {
     text: segments

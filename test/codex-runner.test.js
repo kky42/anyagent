@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 
 import { buildCodexArgs } from "../src/cli_adapter/codex/args.js";
 import { startCodexRun } from "../src/cli_adapter/codex/runner.js";
-import { TELEGRAM_OUTPUT_DEVELOPER_INSTRUCTIONS } from "../src/chat_adapter/telegram/output-instructions.js";
+import { ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS } from "../src/chat_adapter/output-instructions.js";
 
 test("buildCodexArgs uses exec for a fresh session", () => {
   assert.deepEqual(buildCodexArgs({
@@ -199,21 +199,22 @@ test("buildCodexArgs injects developer_instructions only for fresh sessions", ()
   const freshArgs = buildCodexArgs({
     workdir: "/tmp/project",
     message: "hello",
-    developerInstructions: TELEGRAM_OUTPUT_DEVELOPER_INSTRUCTIONS
+    developerInstructions: ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS
   });
   const resumedArgs = buildCodexArgs({
     workdir: "/tmp/project",
     sessionId: "session-123",
     message: "hello",
-    developerInstructions: TELEGRAM_OUTPUT_DEVELOPER_INSTRUCTIONS
+    developerInstructions: ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS
   });
 
   assert.ok(freshArgs.includes("-c"));
   assert.ok(
     freshArgs.includes(
-      `developer_instructions=${JSON.stringify(TELEGRAM_OUTPUT_DEVELOPER_INSTRUCTIONS)}`
+      `developer_instructions=${JSON.stringify(ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS)}`
     )
   );
+  assert.doesNotMatch(ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS, /Telegram|HTML|Markdown/i);
   assert.ok(
     !resumedArgs.some((arg) => arg.startsWith("developer_instructions="))
   );

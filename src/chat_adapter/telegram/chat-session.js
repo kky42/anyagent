@@ -13,7 +13,7 @@ import { readContextLengthForSession } from "../../cli_adapter/codex/context-len
 import { eventToActions } from "../../cli_adapter/codex/events.js";
 import { startCodexRun } from "../../cli_adapter/codex/runner.js";
 import { buildTurnInputMessage } from "../../cli_adapter/turn-input.js";
-import { TELEGRAM_OUTPUT_DEVELOPER_INSTRUCTIONS } from "./output-instructions.js";
+import { ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS } from "../output-instructions.js";
 import { renderStatusMessage } from "./render.js";
 import {
   normalizeSettingArgument
@@ -585,7 +585,7 @@ export class ChatSession {
       autoMode: this.auto,
       model: this.model,
       reasoningEffort: this.reasoningEffort,
-      developerInstructions: TELEGRAM_OUTPUT_DEVELOPER_INSTRUCTIONS
+      developerInstructions: ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS
     });
     const redactedArgs = debugArgs.slice();
     if (redactedArgs.length > 0) {
@@ -611,7 +611,7 @@ export class ChatSession {
       autoMode: this.auto,
       model: this.model,
       reasoningEffort: this.reasoningEffort,
-      developerInstructions: TELEGRAM_OUTPUT_DEVELOPER_INSTRUCTIONS,
+      developerInstructions: ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS,
       onEvent: async (event) => {
         const actions = eventToActions(event);
         for (const action of actions) {

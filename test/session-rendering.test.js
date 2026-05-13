@@ -421,7 +421,7 @@ test("progress message edits fall back to plain text when Telegram HTML and Mark
   ]);
 });
 
-test("final agent_message can send attachments declared in the stripped output block", async () => {
+test("final agent_message can send attachments declared in the XML output block", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-output-"));
   const artifactDir = path.join(tempDir, "artifacts");
   await fs.mkdir(artifactDir, { recursive: true });
@@ -450,9 +450,9 @@ test("final agent_message can send attachments declared in the stripped output b
       id: "item_2",
       type: "agent_message",
       text: [
-        "<telegram-attachments>",
-        '[{"path":"./artifacts/chart.png"}]',
-        "</telegram-attachments>",
+        "<attachments>",
+        '<attachment path="./artifacts/chart.png" />',
+        "</attachments>",
         "",
         "Here is the chart."
       ].join("\n")
@@ -472,7 +472,7 @@ test("final agent_message can send attachments declared in the stripped output b
     },
     {
       chatId: 1001,
-      text: "\n\nHere is the chart.",
+      text: "Here is the chart.",
       parseMode: "HTML"
     }
   ]);
@@ -520,9 +520,9 @@ test("attachment-only final agent_message deletes the transient progress message
       id: "item_2",
       type: "agent_message",
       text: [
-        "<telegram-attachments>",
-        '[{"path":"./report.pdf","kind":"document"}]',
-        "</telegram-attachments>"
+        "<attachments>",
+        '<attachment path="./report.pdf" kind="document" />',
+        "</attachments>"
       ].join("\n")
     }
   });
@@ -581,13 +581,14 @@ test("multiple control blocks preserve text, attachment, and error order", async
       type: "agent_message",
       text: [
         "Before",
-        "<telegram-attachments>",
-        '[{"path":"./chart.png"}]',
-        "</telegram-attachments>",
+        "<attachments>",
+        '<attachment path="./chart.png" />',
+        "</attachments>",
         "Between",
-        "<telegram-attachments>",
-        '[{"path":"./missing.pdf","kind":"document"},{"path":"./report.pdf","kind":"document"}]',
-        "</telegram-attachments>",
+        "<attachments>",
+        '<attachment path="./missing.pdf" kind="document" />',
+        '<attachment path="./report.pdf" kind="document" />',
+        "</attachments>",
         "After"
       ].join("\n")
     }
@@ -605,7 +606,7 @@ test("multiple control blocks preserve text, attachment, and error order", async
     },
     {
       chatId: 1001,
-      text: "\nBetween\n",
+      text: "Between",
       parseMode: "HTML"
     },
     {
@@ -620,7 +621,7 @@ test("multiple control blocks preserve text, attachment, and error order", async
     },
     {
       chatId: 1001,
-      text: "\nAfter",
+      text: "After",
       parseMode: "HTML"
     }
   ]);
@@ -628,7 +629,7 @@ test("multiple control blocks preserve text, attachment, and error order", async
     {
       chatId: 1001,
       messageId: 1,
-      text: "Before\n",
+      text: "Before",
       parseMode: "HTML"
     }
   ]);
@@ -672,9 +673,9 @@ test("oversized outbound attachments become inline errors without sending", asyn
       id: "item_2",
       type: "agent_message",
       text: [
-        "<telegram-attachments>",
-        '[{"path":"./large.bin","kind":"document"}]',
-        "</telegram-attachments>"
+        "<attachments>",
+        '<attachment path="./large.bin" kind="document" />',
+        "</attachments>"
       ].join("\n")
     }
   });

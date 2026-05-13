@@ -6,7 +6,8 @@ import {
   outboundAttachmentLimitText
 } from "./attachments.js";
 import { splitPlainText } from "../../utils.js";
-import { parseTelegramOutputSegments } from "./output-attachments.js";
+import { parseOutputSegments } from "../output-attachments.js";
+import { renderMarkdownToTelegramHtml } from "./markdown-renderer.js";
 import { escapeTelegramMarkdown } from "./render.js";
 import { TelegramApiError } from "./telegram-api.js";
 
@@ -151,9 +152,12 @@ export class MessageRenderer {
     throw previousParseError ?? new Error("Telegram render fallback exhausted unexpectedly.");
   }
 
-  async sendMessageChunk(rawChunk) {
+  async sendMessageChunk(rawChunk, options = {}) {
+    const renderChunk = options.renderMarkdown
+      ? renderMarkdownToTelegramHtml(rawChunk)
+      : rawChunk;
     return this.renderWithFallback({
-      rawChunk,
+      rawChunk: renderChunk,
       send: ({ text, parseMode }) =>
         this.botApi.sendMessage({
           chatId: this.chatId,
@@ -163,9 +167,12 @@ export class MessageRenderer {
     });
   }
 
-  async editMessageChunk(messageId, rawChunk) {
+  async editMessageChunk(messageId, rawChunk, options = {}) {
+    const renderChunk = options.renderMarkdown
+      ? renderMarkdownToTelegramHtml(rawChunk)
+      : rawChunk;
     return this.renderWithFallback({
-      rawChunk,
+      rawChunk: renderChunk,
       send: ({ text, parseMode }) =>
         this.botApi.editMessageText({
           chatId: this.chatId,
@@ -176,11 +183,11 @@ export class MessageRenderer {
     });
   }
 
-  async sendSplitText(rawText) {
+  async sendSplitText(rawText, options = {}) {
     let firstMessageId = null;
 
     for (const rawChunk of splitPlainText(rawText, TELEGRAM_RENDER_CHUNK_SIZE)) {
-      const result = await this.sendMessageChunk(rawChunk);
+      const result = await this.sendMessageChunk(rawChunk, options);
       firstMessageId ??= getTelegramMessageId(result);
     }
 
@@ -207,7 +214,7 @@ export class MessageRenderer {
     this.lastRenderedProgressText = displayText;
   }
 
-  async renderTerminalText(rawText) {
+  async renderTerminalText(rawText, options = {}) {
     if (!rawText) {
       return;
     }
@@ -217,18 +224,18 @@ export class MessageRenderer {
 
     if (this.progressMessageId) {
       if (firstChunk !== this.lastRenderedProgressText) {
-        await this.editMessageChunk(this.progressMessageId, firstChunk);
+        await this.editMessageChunk(this.progressMessageId, firstChunk, options);
       }
       this.progressMessageId = null;
       this.lastRenderedProgressText = null;
 
       for (const rawChunk of remainingChunks) {
-        await this.sendMessageChunk(rawChunk);
+        await this.sendMessageChunk(rawChunk, options);
       }
       return;
     }
 
-    await this.sendSplitText(rawText);
+    await this.sendSplitText(rawText, options);
   }
 
   async sendAttachment(attachment, options = {}) {
@@ -332,19 +339,19 @@ export class MessageRenderer {
   }
 
   async sendCodexOutput(text, options = {}) {
-    const segments = parseTelegramOutputSegments(String(text ?? ""));
+    const segments = parseOutputSegments(String(text ?? ""));
     await this.renderOutputSegments(segments, {
       ...options,
-      deliverText: (rawText) => this.sendText(rawText)
+      deliverText: (rawText) => this.sendText(rawText, { renderMarkdown: true })
     });
   }
 
   async renderFinalMessage(text, options = {}) {
-    const segments = parseTelegramOutputSegments(String(text ?? ""));
+    const segments = parseOutputSegments(String(text ?? ""));
     await this.renderOutputSegments(segments, {
       ...options,
       clearProgressAfterFirstAttachment: true,
-      deliverText: (rawText) => this.renderTerminalText(rawText)
+      deliverText: (rawText) => this.renderTerminalText(rawText, { renderMarkdown: true })
     });
   }
 
@@ -352,12 +359,12 @@ export class MessageRenderer {
     await this.renderTerminalText(String(text ?? "").trim());
   }
 
-  async sendText(text) {
+  async sendText(text, options = {}) {
     const rawText = String(text ?? "");
     if (!rawText) {
       return;
     }
 
-    await this.sendSplitText(rawText);
+    await this.sendSplitText(rawText, options);
   }
 }

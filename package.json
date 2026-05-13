@@ -34,5 +34,8 @@
     "telegram",
     "relay"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "marked": "^18.0.3"
+  }
 }
