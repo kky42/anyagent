@@ -22,16 +22,15 @@ export const TELEGRAM_COMMANDS = [
 function unauthorizedMessage(user) {
   const username = normalizeTelegramUsername(user?.username);
   if (username) {
-    return `You are not authorized to use this bot. Your Telegram username is @${username}. Add "${username}" to allowedUsernames in the relay config.`;
+    return `You are not authorized to use this bot. Your Telegram username is @${username}. Add "${username}" to allowedUsernames in this Telegram binding.`;
   }
 
-  return "You are not authorized to use this bot. Your Telegram account has no username set. Add one in Telegram Settings, then add it to allowedUsernames in the relay config.";
+  return "You are not authorized to use this bot. Your Telegram account has no username set. Add one in Telegram Settings, then add it to allowedUsernames in this Telegram binding.";
 }
 
 export class BotRuntime {
   constructor({
     botConfig,
-    stateStore,
     configStore = NOOP_CONFIG_STORE,
     fetchImpl = globalThis.fetch,
     botApi = null,
@@ -40,7 +39,6 @@ export class BotRuntime {
     albumQuietPeriodMs = ALBUM_QUIET_PERIOD_MS
   }) {
     this.botConfig = botConfig;
-    this.stateStore = stateStore;
     this.configStore = configStore;
     this.botApi = botApi ?? new TelegramBotApi(botConfig.token, fetchImpl);
     this.createCodexRun = createCodexRun;
@@ -56,7 +54,7 @@ export class BotRuntime {
   }
 
   log(message) {
-    process.stderr.write(`[${this.botConfig.name}] ${message}\n`);
+    process.stderr.write(`[telegram:@${this.botConfig.username}] ${message}\n`);
   }
 
   sessionFor(chatId) {
@@ -66,7 +64,6 @@ export class BotRuntime {
       session = new ChatSession({
         botConfig: this.botConfig,
         botApi: this.botApi,
-        stateStore: this.stateStore,
         configStore: this.configStore,
         logger: (message) => this.log(`${chatId}: ${message}`),
         chatId,
@@ -99,9 +96,29 @@ export class BotRuntime {
 
   async initialize() {
     const me = await this.botApi.getMe();
-    this.botUsername = me.username ?? null;
+    this.botUsername = normalizeTelegramUsername(me.username);
+    if (this.botUsername !== this.botConfig.username) {
+      throw new Error(
+        `Configured Telegram bot username @${this.botConfig.username} does not match token owner @${this.botUsername || "unknown"}.`
+      );
+    }
+    await this.discardPendingUpdates();
     await this.botApi.setMyCommands(TELEGRAM_COMMANDS);
-    this.log(`ready as @${this.botUsername ?? "unknown"} with workdir ${this.botConfig.workdir}`);
+    this.log(
+      `ready as @${this.botUsername} for agent ${this.botConfig.agent.id} with workdir ${this.botConfig.agent.workdir}`
+    );
+  }
+
+  async discardPendingUpdates() {
+    const updates = await this.botApi.getUpdates({
+      offset: -1,
+      limit: 1,
+      timeout: 0
+    });
+    const lastUpdate = updates.at(-1);
+    if (typeof lastUpdate?.update_id === "number") {
+      this.offset = lastUpdate.update_id + 1;
+    }
   }
 
   async sendDirectMessage(chatId, text) {
@@ -123,7 +140,7 @@ export class BotRuntime {
       return;
     }
 
-    await session.sendText(`Cleared cache for ${this.botConfig.name}.`);
+    await session.sendText(`Cleared cache for @${this.botConfig.username}.`);
   }
 
   async handleMessage(message) {

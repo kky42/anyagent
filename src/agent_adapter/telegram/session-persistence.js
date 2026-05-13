@@ -3,23 +3,12 @@ import {
   DEFAULT_REASONING_EFFORT
 } from "../../runtime-settings.js";
 import { AUTO_DEFAULT } from "../../auto-mode.js";
-import { toErrorMessage } from "../../utils.js";
 
 export const NOOP_CONFIG_STORE = {
-  async patchBotConfig() {},
-  async loadBotConfig() {
+  async loadTelegramBotConfig() {
     throw new Error("Config reload is unavailable.");
   }
 };
-
-/**
- * @typedef {object} ChatStatePatch
- * @property {string | null | undefined} [threadId]
- * @property {number | null | undefined} [contextLength]
- * @property {string | undefined} [auto]
- * @property {string | undefined} [model]
- * @property {string | undefined} [reasoningEffort]
- */
 
 function applyObjectPatch(target, patch) {
   for (const [key, value] of Object.entries(patch)) {
@@ -31,29 +20,21 @@ function applyObjectPatch(target, patch) {
   }
 }
 
-export class SessionPersistence {
-  constructor({
-    botConfig,
-    stateStore,
-    configStore,
-    chatId,
-    logger = () => {}
-  }) {
-    this.botConfig = botConfig;
-    this.stateStore = stateStore;
-    this.configStore = configStore ?? NOOP_CONFIG_STORE;
-    this.chatId = chatId;
-    this.logger = logger;
+function runtimeStateFromAgent(agent) {
+  return {
+    threadId: null,
+    contextLength: null,
+    workdir: agent?.workdir,
+    auto: agent?.auto ?? AUTO_DEFAULT,
+    model: agent?.model ?? DEFAULT_MODEL,
+    reasoningEffort: agent?.reasoningEffort ?? DEFAULT_REASONING_EFFORT
+  };
+}
 
-    const persisted = stateStore.getChatState(botConfig.name, chatId);
-    this.state = {
-      threadId: persisted.threadId,
-      contextLength: persisted.contextLength,
-      auto: persisted.auto ?? botConfig.auto ?? AUTO_DEFAULT,
-      model: persisted.model ?? botConfig.model ?? DEFAULT_MODEL,
-      reasoningEffort:
-        persisted.reasoningEffort ?? botConfig.reasoningEffort ?? DEFAULT_REASONING_EFFORT
-    };
+export class SessionPersistence {
+  constructor({ botConfig }) {
+    this.botConfig = botConfig;
+    this.state = runtimeStateFromAgent(botConfig.agent);
   }
 
   get threadId() {
@@ -70,6 +51,14 @@ export class SessionPersistence {
 
   set contextLength(contextLength) {
     this.state.contextLength = contextLength;
+  }
+
+  get workdir() {
+    return this.state.workdir;
+  }
+
+  set workdir(workdir) {
+    this.state.workdir = workdir;
   }
 
   get auto() {
@@ -96,135 +85,24 @@ export class SessionPersistence {
     this.state.reasoningEffort = reasoningEffort;
   }
 
-  snapshotPersistedState() {
-    return {
-      threadId: this.threadId,
-      contextLength: this.contextLength
-    };
-  }
-
-  restorePersistedState(snapshot) {
-    this.threadId = snapshot.threadId;
-    this.contextLength = snapshot.contextLength;
-  }
-
   async updateThreadId(threadId) {
-    const previousState = this.snapshotPersistedState();
-
-    try {
-      await this.stateStore.patchChatState(this.botConfig.name, this.chatId, {
-        threadId,
-        contextLength: this.contextLength
-      });
-    } catch (error) {
-      this.restorePersistedState(previousState);
-      throw error;
-    }
-
     this.threadId = threadId;
   }
 
   async updateContextLength(contextLength) {
-    const previousState = this.snapshotPersistedState();
-
-    try {
-      await this.stateStore.patchChatState(this.botConfig.name, this.chatId, {
-        threadId: this.threadId,
-        contextLength
-      });
-    } catch (error) {
-      this.restorePersistedState(previousState);
-      throw error;
-    }
-
     this.contextLength = contextLength;
   }
 
   async clearPersistedState() {
-    const previousState = this.snapshotPersistedState();
-
-    try {
-      await this.stateStore.patchChatState(this.botConfig.name, this.chatId, {
-        threadId: null,
-        contextLength: null
-      });
-    } catch (error) {
-      this.restorePersistedState(previousState);
-      throw error;
-    }
-
     this.threadId = null;
     this.contextLength = null;
   }
 
   async resetChatToBotDefaults() {
-    try {
-      await this.stateStore.patchChatState(this.botConfig.name, this.chatId, {
-        threadId: null,
-        contextLength: null,
-        auto: null,
-        model: null,
-        reasoningEffort: null
-      });
-    } catch (error) {
-      throw error;
-    }
-
-    this.threadId = null;
-    this.contextLength = null;
-    this.auto = this.botConfig.auto ?? AUTO_DEFAULT;
-    this.model = this.botConfig.model ?? DEFAULT_MODEL;
-    this.reasoningEffort = this.botConfig.reasoningEffort ?? DEFAULT_REASONING_EFFORT;
-  }
-
-  async persistBotConfig(patch) {
-    const previousValues = {};
-    for (const [key] of Object.entries(patch)) {
-      previousValues[key] = this.botConfig[key];
-    }
-
-    await this.configStore.patchBotConfig(this.botConfig.name, patch);
-    applyObjectPatch(this.botConfig, patch);
-
-    return previousValues;
-  }
-
-  async rollbackBotConfig(previousValues) {
-    try {
-      await this.configStore.patchBotConfig(this.botConfig.name, previousValues);
-    } catch (error) {
-      this.logger(`config rollback failed: ${toErrorMessage(error)}`);
-      throw error;
-    }
-
-    applyObjectPatch(this.botConfig, previousValues);
-  }
-
-  async persistRuntimeSettings(patch) {
-    const previousDefaults = await this.persistBotConfig(patch);
-
-    try {
-      await this.stateStore.patchChatState(this.botConfig.name, this.chatId, patch);
-    } catch (error) {
-      try {
-        await this.rollbackBotConfig(previousDefaults);
-      } catch (rollbackError) {
-        this.logger(`runtime settings rollback failed: ${toErrorMessage(rollbackError)}`);
-      }
-      throw error;
-    }
+    this.state = runtimeStateFromAgent(this.botConfig.agent);
   }
 
   async applyRuntimeSettings(patch) {
-    await this.persistRuntimeSettings(patch);
-    if (Object.hasOwn(patch, "auto")) {
-      this.auto = patch.auto;
-    }
-    if (Object.hasOwn(patch, "model")) {
-      this.model = patch.model;
-    }
-    if (Object.hasOwn(patch, "reasoningEffort")) {
-      this.reasoningEffort = patch.reasoningEffort;
-    }
+    applyObjectPatch(this.state, patch);
   }
 }

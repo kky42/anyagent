@@ -3,14 +3,13 @@ import process from "node:process";
 import { BotRuntime } from "./agent_adapter/telegram/bot-runtime.js";
 import { ConfigStore } from "./config-store.js";
 import { loadConfig } from "./config.js";
-import { StateStore } from "./state-store.js";
 import { DEFAULT_CONFIG_PATH, toErrorMessage } from "./utils.js";
 
 function printHelp() {
   process.stdout.write(`Usage: anyagent [--config /path/to/config.json]
 
 Options:
-  --config <path>  Use a custom config file
+  --config <path>  Use a custom agent config directory or config.json file
   --help           Show this help
 `);
 }
@@ -45,15 +44,16 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   const config = await loadConfig(args.configPath);
-  const stateStore = new StateStore(config.statePath);
   const configStore = new ConfigStore(config.configPath);
-  await stateStore.load();
 
-  const runtimes = config.bots.map(
+  if (config.telegramBots.length === 0) {
+    throw new Error(`No Telegram bots configured under ${config.configPath}.`);
+  }
+
+  const runtimes = config.telegramBots.map(
     (botConfig) =>
       new BotRuntime({
         botConfig,
-        stateStore,
         configStore
       })
   );

@@ -79,6 +79,40 @@ test("getFile sends the Telegram getFile payload", async () => {
   assert.deepEqual(result, { file_id: "file-1", file_path: "documents/test.pdf" });
 });
 
+test("getUpdates sends offset and limit when provided", async () => {
+  const calls = [];
+  const api = new TelegramBotApi("token", async (url, options) => {
+    calls.push({
+      url,
+      payload: JSON.parse(options.body)
+    });
+
+    return {
+      ok: true,
+      async json() {
+        return {
+          ok: true,
+          result: []
+        };
+      }
+    };
+  });
+
+  await api.getUpdates({ offset: -1, limit: 1, timeout: 0 });
+
+  assert.deepEqual(calls, [
+    {
+      url: "https://api.telegram.org/bottoken/getUpdates",
+      payload: {
+        offset: -1,
+        limit: 1,
+        timeout: 0,
+        allowed_updates: ["message"]
+      }
+    }
+  ]);
+});
+
 test("downloadFile streams binary responses", async () => {
   const api = new TelegramBotApi("token", async (url) => {
     assert.equal(url, "https://api.telegram.org/file/bottoken/documents/test.pdf");

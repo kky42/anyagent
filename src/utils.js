@@ -3,8 +3,8 @@ import os from "node:os";
 import path from "node:path";
 
 export const APP_DIR = path.join(os.homedir(), ".anyagent");
-export const DEFAULT_CONFIG_PATH = path.join(APP_DIR, "config.json");
-export const DEFAULT_STATE_PATH = path.join(APP_DIR, "state.json");
+export const DEFAULT_AGENTS_PATH = path.join(APP_DIR, "agents");
+export const DEFAULT_CONFIG_PATH = DEFAULT_AGENTS_PATH;
 export const DEFAULT_CACHE_PATH = path.join(APP_DIR, "cache");
 export const TELEGRAM_MESSAGE_LIMIT = 4000;
 export const INVALID_WORKDIR_MESSAGE =

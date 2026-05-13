@@ -73,16 +73,20 @@ export class TelegramBotApi {
     return this.call("getFile", { file_id: fileId }, options);
   }
 
-  getUpdates({ offset, timeout = 50 } = {}, options = {}) {
-    return this.call(
-      "getUpdates",
-      {
-        offset,
-        timeout,
-        allowed_updates: ["message"]
-      },
-      options
-    );
+  getUpdates({ offset, limit, timeout = 50 } = {}, options = {}) {
+    const payload = {
+      timeout,
+      allowed_updates: ["message"]
+    };
+
+    if (offset !== undefined) {
+      payload.offset = offset;
+    }
+    if (limit !== undefined) {
+      payload.limit = limit;
+    }
+
+    return this.call("getUpdates", payload, options);
   }
 
   sendMessage({ chatId, text, parseMode = null }, options = {}) {

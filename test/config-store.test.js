@@ -6,31 +6,34 @@ import assert from "node:assert/strict";
 
 import { ConfigStore } from "../src/config-store.js";
 
-test("ConfigStore patches target bot defaults in config.json", async () => {
+test("ConfigStore reloads a telegram bot binding from config.json", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-config-store-"));
-  const configPath = path.join(tempDir, "config.json");
+  const agentsDir = path.join(tempDir, "agents");
+  const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-workdir-"));
+  await fs.mkdir(path.join(agentsDir, "primary"), { recursive: true });
   await fs.writeFile(
-    configPath,
+    path.join(agentsDir, "primary", "config.json"),
     JSON.stringify(
       {
-        bots: [
-          {
-            name: "primary",
-            token: "token-1",
-            workdir: "/tmp/old-project",
-            auto: "high",
-            model: "default",
-            reasoningEffort: "default"
-          },
-          {
-            name: "secondary",
-            token: "token-2",
-            workdir: "/tmp/secondary-project",
-            auto: "high",
-            model: "default",
-            reasoningEffort: "default"
+        profile: {
+          cli: "codex",
+          workdir,
+          auto: "high",
+          model: "default",
+          reasoningEffort: "default"
+        },
+        bindings: {
+          telegram: {
+            allowedUsernames: ["@OwnerUser"],
+            bots: [
+              {
+                username: "RelayBot",
+                token: "token-1",
+                allowedUsernames: ["@AllowedUser"]
+              }
+            ]
           }
-        ]
+        }
       },
       null,
       2
@@ -38,29 +41,14 @@ test("ConfigStore patches target bot defaults in config.json", async () => {
     "utf8"
   );
 
-  const configStore = new ConfigStore(configPath);
-  await configStore.patchBotConfig("primary", {
-    workdir: "/tmp/new-project",
-    auto: "low",
-    model: "gpt-5.4",
-    reasoningEffort: "high"
+  const configStore = new ConfigStore(agentsDir);
+  const botConfig = await configStore.loadTelegramBotConfig({
+    agentId: "primary",
+    username: "relaybot"
   });
 
-  const updated = JSON.parse(await fs.readFile(configPath, "utf8"));
-  assert.deepEqual(updated.bots[0], {
-    name: "primary",
-    token: "token-1",
-    workdir: "/tmp/new-project",
-    auto: "low",
-    model: "gpt-5.4",
-    reasoningEffort: "high"
-  });
-  assert.deepEqual(updated.bots[1], {
-    name: "secondary",
-    token: "token-2",
-    workdir: "/tmp/secondary-project",
-    auto: "high",
-    model: "default",
-    reasoningEffort: "default"
-  });
+  assert.equal(botConfig.username, "relaybot");
+  assert.equal(botConfig.agent.id, "primary");
+  assert.equal(botConfig.agent.workdir, workdir);
+  assert.deepEqual(botConfig.allowedUsernames, ["owneruser", "alloweduser"]);
 });

@@ -5,11 +5,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createRuntime } from "./support/builders.js";
+import { FakeBotApi } from "./support/fakes.js";
 import { waitFor } from "./support/async.js";
 
-function buildTextMessage(text, username = "AllowedUser") {
+function buildTextMessage(text, username = "AllowedUser", chatId = 1001) {
   return {
-    chat: { id: 1001, type: "private" },
+    chat: { id: chatId, type: "private" },
     from: { id: 42, username },
     text
   };
@@ -26,8 +27,25 @@ test("unauthorized users are told which Telegram username to allow", async () =>
 
   assert.equal(
     fakeBotApi.messages.at(-1).text,
-    'You are not authorized to use this bot. Your Telegram username is @otheruser. Add "otheruser" to allowedUsernames in the relay config.'
+    'You are not authorized to use this bot. Your Telegram username is @otheruser. Add "otheruser" to allowedUsernames in this Telegram binding.'
   );
+});
+
+test("runtime discards pending Telegram updates during startup", async () => {
+  const fakeBotApi = new FakeBotApi({
+    getUpdatesResult: [{ update_id: 77, message: { text: "old" } }]
+  });
+  const { runtime } = await createRuntime({ fakeBotApi });
+
+  await runtime.initialize();
+
+  assert.deepEqual(fakeBotApi.getUpdatesCalls[0], {
+    offset: -1,
+    limit: 1,
+    timeout: 0
+  });
+  assert.equal(runtime.offset, 78);
+  assert.equal(runtime.sessions.size, 0);
 });
 
 test("runtime aggregates media groups into one attachment turn", async () => {
@@ -83,8 +101,8 @@ test("runtime rejects unsupported non-text messages", async () => {
 
 test("runtime clears only the current bot cache", async () => {
   const { runtime, fakeBotApi, cacheRootDir } = await createRuntime();
-  const primaryCacheDir = path.join(cacheRootDir, "primary");
-  const secondaryCacheDir = path.join(cacheRootDir, "secondary");
+  const primaryCacheDir = path.join(cacheRootDir, "telegram", "relaybot");
+  const secondaryCacheDir = path.join(cacheRootDir, "telegram", "otherbot");
   await fs.mkdir(primaryCacheDir, { recursive: true });
   await fs.mkdir(secondaryCacheDir, { recursive: true });
   await fs.writeFile(path.join(primaryCacheDir, "one.txt"), "primary", "utf8");
@@ -94,85 +112,90 @@ test("runtime clears only the current bot cache", async () => {
 
   await assert.rejects(() => fs.stat(primaryCacheDir));
   assert.equal(await fs.readFile(path.join(secondaryCacheDir, "two.txt"), "utf8"), "secondary");
-  assert.equal(fakeBotApi.messages.at(-1).text, "Cleared cache for primary.");
+  assert.equal(fakeBotApi.messages.at(-1).text, "Cleared cache for @relaybot.");
 });
 
-test("runtime refuses to clear cache while bot work is pending", async () => {
+test("runtime routes /auto, /model, and /reasoning to the current chat session", async () => {
   const { runtime, fakeBotApi } = await createRuntime();
-  const session = runtime.sessionFor(1001);
-  session.queue.push({ promptText: "pending", attachments: [] });
-
-  await runtime.handleMessage(buildTextMessage("/clear_cache"));
-
-  assert.equal(
-    fakeBotApi.messages.at(-1).text,
-    "Cannot clear cache while runs, queued turns, or media albums are pending."
-  );
-});
-
-test("runtime routes /auto to the session", async () => {
-  const { runtime, fakeBotApi, stateStore } = await createRuntime();
 
   await runtime.handleMessage(buildTextMessage("/auto low"));
-
-  assert.equal(stateStore.getChatState("primary", 1001).auto, "low");
-  assert.equal(fakeBotApi.messages.at(-1).text, "Auto level set to low.");
-});
-
-test("runtime routes /model and /reasoning to the session", async () => {
-  const { runtime, fakeBotApi, stateStore } = await createRuntime();
-
   await runtime.handleMessage(buildTextMessage("/model gpt-5.4"));
   await runtime.handleMessage(buildTextMessage("/reasoning high"));
 
-  assert.equal(stateStore.getChatState("primary", 1001).model, "gpt-5.4");
-  assert.equal(stateStore.getChatState("primary", 1001).reasoningEffort, "high");
+  const session = runtime.sessionFor(1001);
+  assert.equal(session.auto, "low");
+  assert.equal(session.model, "gpt-5.4");
+  assert.equal(session.reasoningEffort, "high");
+  assert.equal(fakeBotApi.messages.at(-3).text, "Auto level set to low.");
   assert.equal(fakeBotApi.messages.at(-2).text, "Model set to gpt-5.4.");
   assert.equal(fakeBotApi.messages.at(-1).text, "Reasoning effort set to high.");
 });
 
-test("runtime routes /reset to the session", async () => {
-  const nextWorkdir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-reset-"));
-  const { runtime, fakeBotApi, stateStore, configStore } = await createRuntime({
+test("runtime keeps separate sessions for different private chats", async () => {
+  const { runtime } = await createRuntime({
     botConfig: {
-      auto: "low",
-      model: "gpt-5.4",
-      reasoningEffort: "low"
+      agent: {
+        id: "primary-agent",
+        cli: "codex",
+        workdir: "/tmp/project",
+        auto: "medium",
+        model: "deepseek-v4-flash",
+        reasoningEffort: "default"
+      }
+    }
+  });
+
+  await runtime.handleMessage(buildTextMessage("/model gpt-5.5", "AllowedUser", 1001));
+
+  const sessionA = runtime.sessionFor(1001);
+  const sessionB = runtime.sessionFor(2002);
+
+  assert.equal(sessionA.model, "gpt-5.5");
+  assert.equal(sessionB.model, "deepseek-v4-flash");
+  assert.equal(sessionA.workdir, "/tmp/project");
+  assert.equal(sessionB.workdir, "/tmp/project");
+});
+
+test("runtime routes /reset to the current chat session only", async () => {
+  const nextWorkdir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-reset-"));
+  const { runtime, fakeBotApi, configStore } = await createRuntime({
+    botConfig: {
+      agent: {
+        id: "primary-agent",
+        cli: "codex",
+        workdir: "/tmp/project-old",
+        auto: "low",
+        model: "gpt-5.4",
+        reasoningEffort: "low"
+      }
     }
   });
 
   await runtime.handleMessage(buildTextMessage("/auto high"));
   await runtime.handleMessage(buildTextMessage("/reasoning xhigh"));
   configStore.loadedBotConfig = {
-    name: "primary",
-    token: "token",
-    workdir: nextWorkdir,
+    username: "relaybot",
     allowedUsernames: ["alloweduser"],
-    auto: "medium",
-    model: "default",
-    reasoningEffort: "high"
+    agent: {
+      id: "primary-agent",
+      cli: "codex",
+      workdir: nextWorkdir,
+      auto: "medium",
+      model: "default",
+      reasoningEffort: "high"
+    }
   };
   await runtime.handleMessage(buildTextMessage("/reset"));
 
-  assert.deepEqual(stateStore.getChatState("primary", 1001), {
-    threadId: null,
-    contextLength: null,
-    auto: null,
-    model: null,
-    reasoningEffort: null
-  });
+  const session = runtime.sessionFor(1001);
+  assert.equal(session.threadId, null);
+  assert.equal(session.contextLength, null);
+  assert.equal(session.workdir, nextWorkdir);
+  assert.equal(session.auto, "medium");
+  assert.equal(session.model, "default");
+  assert.equal(session.reasoningEffort, "high");
   assert.equal(
     fakeBotApi.messages.at(-1).text,
     `Reset current chat to config defaults. Started a new session with workdir ${nextWorkdir}, auto medium, model default, reasoning effort high.`
   );
-});
-
-test("runtime routes /workdir to the session", async () => {
-  const nextWorkdir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-workdir-"));
-  const { runtime, fakeBotApi, configStore } = await createRuntime();
-
-  await runtime.handleMessage(buildTextMessage(`/workdir ${nextWorkdir}`));
-
-  assert.equal(configStore.patches.at(-1).patch.workdir, nextWorkdir);
-  assert.match(fakeBotApi.messages.at(-1).text, /Started a new session/);
 });

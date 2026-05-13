@@ -45,7 +45,6 @@ export class ChatSession {
   constructor({
     botConfig,
     botApi,
-    stateStore,
     configStore = NOOP_CONFIG_STORE,
     logger,
     chatId,
@@ -56,7 +55,6 @@ export class ChatSession {
   }) {
     this.botConfig = botConfig;
     this.botApi = botApi;
-    this.stateStore = stateStore;
     this.configStore = configStore;
     this.logger = logger;
     this.chatId = chatId;
@@ -70,11 +68,7 @@ export class ChatSession {
     this.resolveHomeDir = resolveHomeDir;
     this.messageRenderer = new MessageRenderer({ botApi, chatId });
     this.persistence = new SessionPersistence({
-      botConfig,
-      stateStore,
-      configStore,
-      chatId,
-      logger
+      botConfig
     });
   }
 
@@ -92,6 +86,14 @@ export class ChatSession {
 
   set contextLength(contextLength) {
     this.persistence.contextLength = contextLength;
+  }
+
+  get workdir() {
+    return this.persistence.workdir;
+  }
+
+  set workdir(workdir) {
+    this.persistence.workdir = workdir;
   }
 
   get auto() {
@@ -144,7 +146,7 @@ export class ChatSession {
 
   renderFinalMessage(text) {
     return this.messageRenderer.renderFinalMessage(text, {
-      workdir: this.botConfig.workdir
+      workdir: this.workdir
     });
   }
 
@@ -158,7 +160,7 @@ export class ChatSession {
 
   sendCodexOutput(text) {
     return this.messageRenderer.sendCodexOutput(text, {
-      workdir: this.botConfig.workdir
+      workdir: this.workdir
     });
   }
 
@@ -192,7 +194,7 @@ export class ChatSession {
   }
 
   cacheDir() {
-    return path.join(this.cacheRootDir, this.botConfig.name);
+    return path.join(this.cacheRootDir, "telegram", this.botConfig.username);
   }
 
   chatCacheDir() {
@@ -304,14 +306,6 @@ export class ChatSession {
     }
   }
 
-  snapshotPersistedState() {
-    return this.persistence.snapshotPersistedState();
-  }
-
-  restorePersistedState(snapshot) {
-    this.persistence.restorePersistedState(snapshot);
-  }
-
   updateThreadId(threadId) {
     return this.persistence.updateThreadId(threadId);
   }
@@ -326,18 +320,6 @@ export class ChatSession {
 
   resetChatToBotDefaults() {
     return this.persistence.resetChatToBotDefaults();
-  }
-
-  persistBotConfig(patch) {
-    return this.persistence.persistBotConfig(patch);
-  }
-
-  rollbackBotConfig(previousValues) {
-    return this.persistence.rollbackBotConfig(previousValues);
-  }
-
-  persistRuntimeSettings(patch) {
-    return this.persistence.persistRuntimeSettings(patch);
   }
 
   applyRuntimeSettings(patch) {
@@ -364,7 +346,7 @@ export class ChatSession {
   async handleWorkdir(args) {
     const requestedWorkdir = normalizeSettingArgument(args);
     if (!requestedWorkdir) {
-      await this.sendText(`Current workdir: ${this.botConfig.workdir}.`);
+      await this.sendText(`Current workdir: ${this.workdir}.`);
       return;
     }
 
@@ -381,7 +363,7 @@ export class ChatSession {
       return;
     }
 
-    if (normalizedWorkdir === this.botConfig.workdir) {
+    if (normalizedWorkdir === this.workdir) {
       await this.sendText(`Workdir is already set to ${normalizedWorkdir}.`);
       return;
     }
@@ -394,35 +376,9 @@ export class ChatSession {
       return;
     }
 
-    const previousState = this.snapshotPersistedState();
-    const previousWorkdir = this.botConfig.workdir;
-
     await prepareForSessionReset(this);
-
-    try {
-      await this.persistBotConfig({ workdir: nextWorkdir });
-    } catch (error) {
-      await this.sendText(`Failed to persist workdir setting: ${toErrorMessage(error)}`);
-      return;
-    }
-
-    try {
-      await this.clearPersistedState();
-    } catch (error) {
-      this.restorePersistedState(previousState);
-
-      try {
-        await this.rollbackBotConfig({ workdir: previousWorkdir });
-      } catch (rollbackError) {
-        await this.sendText(
-          `Failed to reset session after changing workdir: ${toErrorMessage(error)}. Config rollback also failed: ${toErrorMessage(rollbackError)}`
-        );
-        return;
-      }
-
-      await this.sendText(`Failed to reset session after changing workdir: ${toErrorMessage(error)}`);
-      return;
-    }
+    this.workdir = nextWorkdir;
+    await this.clearPersistedState();
 
     await this.sendText(
       `Workdir set to ${nextWorkdir}. Started a new session. The next message will open a fresh Codex thread.`
@@ -432,7 +388,7 @@ export class ChatSession {
   statusText() {
     return renderStatusMessage({
       isRunning: this.isRunning,
-      workdir: this.botConfig.workdir,
+      workdir: this.workdir,
       auto: this.auto,
       model: this.model,
       reasoningEffort: this.reasoningEffort,
@@ -558,39 +514,22 @@ export class ChatSession {
   async handleReset() {
     let reloadedBotConfig;
     try {
-      reloadedBotConfig = await this.configStore.loadBotConfig(this.botConfig.name);
+      reloadedBotConfig = await this.configStore.loadTelegramBotConfig({
+        agentId: this.botConfig.agent.id,
+        username: this.botConfig.username
+      });
     } catch (error) {
       await this.sendText(`Failed to reload bot config: ${toErrorMessage(error)}`);
       return;
     }
 
-    const previousDefaults = {
-      workdir: this.botConfig.workdir,
-      auto: this.botConfig.auto,
-      model: this.botConfig.model,
-      reasoningEffort: this.botConfig.reasoningEffort
-    };
-
     await prepareForSessionReset(this);
-
-    this.botConfig.workdir = reloadedBotConfig.workdir;
-    this.botConfig.auto = reloadedBotConfig.auto;
-    this.botConfig.model = reloadedBotConfig.model;
-    this.botConfig.reasoningEffort = reloadedBotConfig.reasoningEffort;
-
-    try {
-      await this.resetChatToBotDefaults();
-    } catch (error) {
-      this.botConfig.workdir = previousDefaults.workdir;
-      this.botConfig.auto = previousDefaults.auto;
-      this.botConfig.model = previousDefaults.model;
-      this.botConfig.reasoningEffort = previousDefaults.reasoningEffort;
-      await this.sendText(`Failed to reset chat to config defaults: ${toErrorMessage(error)}`);
-      return;
-    }
+    this.botConfig.allowedUsernames = reloadedBotConfig.allowedUsernames;
+    this.botConfig.agent = reloadedBotConfig.agent;
+    await this.resetChatToBotDefaults();
 
     await this.sendText(
-      `Reset current chat to config defaults. Started a new session with workdir ${this.botConfig.workdir}, auto ${formatAuto(this.auto)}, model ${this.model}, reasoning effort ${this.reasoningEffort}.`
+      `Reset current chat to config defaults. Started a new session with workdir ${this.workdir}, auto ${formatAuto(this.auto)}, model ${this.model}, reasoning effort ${this.reasoningEffort}.`
     );
   }
 
@@ -639,7 +578,7 @@ export class ChatSession {
       .map((attachment) => attachment.localPath);
     const message = buildTurnInputMessage(nextTurn);
     const debugArgs = buildCodexArgs({
-      workdir: this.botConfig.workdir,
+      workdir: this.workdir,
       threadId: this.threadId,
       message,
       imagePaths,
@@ -665,7 +604,7 @@ export class ChatSession {
     );
 
     const run = this.createCodexRun({
-      workdir: this.botConfig.workdir,
+      workdir: this.workdir,
       threadId: this.threadId,
       message,
       imagePaths,

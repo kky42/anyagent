@@ -6,7 +6,8 @@ export class FakeBotApi {
     failMarkdownOnce = false,
     failHtmlEditOnce = false,
     failMarkdownEditOnce = false,
-    attachmentFailures = null
+    attachmentFailures = null,
+    getUpdatesResult = []
   } = {}) {
     this.failHtmlOnce = failHtmlOnce;
     this.failMarkdownOnce = failMarkdownOnce;
@@ -21,8 +22,10 @@ export class FakeBotApi {
     this.filesByPath = new Map();
     this.getFileCalls = [];
     this.downloadCalls = [];
+    this.getUpdatesCalls = [];
     this.nextMessageId = 1;
     this.attachmentFailures = attachmentFailures ?? new Map();
+    this.getUpdatesResult = getUpdatesResult;
   }
 
   async sendMessage(payload) {
@@ -90,6 +93,13 @@ export class FakeBotApi {
     return { username: "relaybot" };
   }
 
+  async getUpdates(payload) {
+    this.getUpdatesCalls.push(payload);
+    return typeof this.getUpdatesResult === "function"
+      ? await this.getUpdatesResult(payload)
+      : structuredClone(this.getUpdatesResult);
+  }
+
   async setMyCommands() {
     return true;
   }
@@ -135,27 +145,30 @@ export class FakeBotApi {
 export class FakeConfigStore {
   constructor({ loadedBotConfig = null } = {}) {
     this.patches = [];
-    this.failure = null;
+    this.loads = [];
     this.loadFailure = null;
     this.loadedBotConfig = loadedBotConfig;
   }
 
-  async patchBotConfig(botName, patch) {
-    if (this.failure) {
-      throw this.failure;
-    }
-    this.loadedBotConfig = {
-      ...(this.loadedBotConfig ?? { name: botName }),
-      ...patch
-    };
-    this.patches.push({ botName, patch });
-  }
-
-  async loadBotConfig(botName) {
+  async loadTelegramBotConfig({ agentId, username }) {
     if (this.loadFailure) {
       throw this.loadFailure;
     }
-    return structuredClone(this.loadedBotConfig ?? { name: botName });
+    this.loads.push({ agentId, username });
+    return structuredClone(
+      this.loadedBotConfig ?? {
+        username,
+        agent: {
+          id: agentId,
+          cli: "codex",
+          workdir: "/tmp/project",
+          auto: "medium",
+          model: "default",
+          reasoningEffort: "default"
+        },
+        allowedUsernames: ["alloweduser"]
+      }
+    );
   }
 }
 

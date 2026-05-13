@@ -4,8 +4,8 @@ import assert from "node:assert/strict";
 import { createSession } from "./support/builders.js";
 import { waitFor } from "./support/async.js";
 
-test("session queues incoming messages and resumes with persisted thread id", async () => {
-  const { session, fakeBotApi, runnerFactory, stateStore } = await createSession();
+test("session queues incoming messages and resumes with the current thread id", async () => {
+  const { session, fakeBotApi, runnerFactory } = await createSession();
 
   await session.enqueueMessage("first");
   assert.equal(runnerFactory.runs.length, 1);
@@ -45,12 +45,12 @@ test("session queues incoming messages and resumes with persisted thread id", as
   assert.equal(runnerFactory.runs.length, 2);
   assert.equal(runnerFactory.runs[1].params.threadId, "thread-abc");
   assert.equal(runnerFactory.runs[1].params.autoMode, "medium");
-  assert.equal(stateStore.getChatState("primary", 1001).threadId, "thread-abc");
-  assert.equal(stateStore.getChatState("primary", 1001).contextLength, 21300);
-  assert.equal(stateStore.getChatState("primary", 1001).auto, null);
+  assert.equal(session.threadId, "thread-abc");
+  assert.equal(session.contextLength, 21300);
+  assert.equal(session.auto, "medium");
 });
 
-test("abort clears queue but keeps existing thread id", async () => {
+test("abort clears queue but keeps the existing thread id", async () => {
   const { session, fakeBotApi, runnerFactory } = await createSession();
   session.threadId = "thread-keep";
 
@@ -66,30 +66,27 @@ test("abort clears queue but keeps existing thread id", async () => {
   assert.equal(fakeBotApi.messages.at(-1).text, "Aborted current run and cleared the queue.");
 });
 
-test("new session clears persisted thread id and context length", async () => {
-  const { session, stateStore, fakeBotApi } = await createSession();
+test("new session clears thread id and context length without changing runtime defaults", async () => {
+  const { session, fakeBotApi } = await createSession();
   await session.updateThreadId("thread-old");
   await session.updateContextLength(1200);
+  await session.handleAuto("high");
+  await session.handleModel("gpt-5.4");
 
   await session.handleNewSession();
 
   assert.equal(session.threadId, null);
   assert.equal(session.contextLength, null);
-  assert.deepEqual(stateStore.getChatState("primary", 1001), {
-    threadId: null,
-    contextLength: null,
-    auto: null,
-    model: null,
-    reasoningEffort: null
-  });
+  assert.equal(session.auto, "high");
+  assert.equal(session.model, "gpt-5.4");
   assert.equal(
     fakeBotApi.messages.at(-1).text,
     "Started a new session. The next message will open a fresh Codex thread."
   );
 });
 
-test("resumed sessions keep the latest context length", async () => {
-  const { session, runnerFactory, stateStore } = await createSession();
+test("resumed sessions keep the latest context length in memory", async () => {
+  const { session, runnerFactory } = await createSession();
   session.threadId = "thread-existing";
 
   await session.enqueueMessage("resume");
@@ -106,10 +103,10 @@ test("resumed sessions keep the latest context length", async () => {
   });
   runnerFactory.runs[0].finish();
 
-  await waitFor(() => stateStore.getChatState("primary", 1001).contextLength !== null);
+  await waitFor(() => session.contextLength !== null);
 
-  assert.equal(stateStore.getChatState("primary", 1001).contextLength, 21300);
-  assert.equal(stateStore.getChatState("primary", 1001).auto, null);
-  assert.equal(stateStore.getChatState("primary", 1001).model, null);
-  assert.equal(stateStore.getChatState("primary", 1001).reasoningEffort, null);
+  assert.equal(session.contextLength, 21300);
+  assert.equal(session.auto, "medium");
+  assert.equal(session.model, "default");
+  assert.equal(session.reasoningEffort, "default");
 });

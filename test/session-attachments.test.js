@@ -27,9 +27,10 @@ test("session stages photo attachments and passes image paths to Codex", async (
   assert.equal(runnerFactory.runs[0].params.message, "");
   assert.deepEqual(fakeBotApi.getFileCalls, ["photo-1"]);
   assert.equal(runnerFactory.runs[0].params.imagePaths.length, 1);
-  assert.match(
-    runnerFactory.runs[0].params.imagePaths[0],
-    new RegExp(`${cacheRootDir}/primary/${buildChatCacheDirName(1001)}/`)
+  assert.ok(
+    runnerFactory.runs[0].params.imagePaths[0].startsWith(
+      path.join(cacheRootDir, "telegram", "relaybot", buildChatCacheDirName(1001))
+    )
   );
   assert.equal(path.basename(runnerFactory.runs[0].params.imagePaths[0]), "msg11.jpg");
   assert.equal(await fs.readFile(runnerFactory.runs[0].params.imagePaths[0], "utf8"), "jpg");
