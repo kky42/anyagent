@@ -9,11 +9,12 @@ import { createRuntime } from "./support/builders.js";
 import { FakeBotApi } from "./support/fakes.js";
 import { waitFor } from "./support/async.js";
 
-function buildTextMessage(text, username = "AllowedUser", chatId = 1001) {
+function buildTextMessage(text, username = "AllowedUser", chatId = 1001, overrides = {}) {
   return {
     chat: { id: chatId, type: "private" },
     from: { id: 42, username },
-    text
+    text,
+    ...overrides
   };
 }
 
@@ -112,6 +113,25 @@ test("runtime rejects unsupported non-text messages", async () => {
   );
 });
 
+test("runtime ignores Telegram topic-created service messages", async () => {
+  const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
+
+  await runtime.handleMessage({
+    message_id: 101,
+    chat: { id: 1001, type: "private" },
+    from: { id: 42, username: "AllowedUser" },
+    message_thread_id: 11,
+    forum_topic_created: {
+      name: "list all message",
+      icon_color: 7322096
+    }
+  });
+
+  assert.equal(fakeBotApi.messages.length, 0);
+  assert.equal(runnerFactory.runs.length, 0);
+  assert.equal(runtime.sessions.size, 0);
+});
+
 test("runtime writes different private chats to different attachment cache scopes", async () => {
   const { runtime, fakeBotApi, cacheRootDir, runnerFactory } = await createRuntime();
   const firstScope = telegramScope(cacheRootDir, { chatId: 1001 });
@@ -196,6 +216,181 @@ test("runtime treats unknown slash commands as normal prompts", async () => {
   assert.equal(runnerFactory.runs.length, 1);
   assert.equal(runnerFactory.runs[0].params.message, "/unknown_command");
   runnerFactory.runs[0].finish();
+});
+
+test("runtime shares one private chat session across Telegram threads but replies to each source thread", async () => {
+  const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
+
+  await runtime.handleMessage(
+    buildTextMessage("thread one", "AllowedUser", 1001, {
+      message_id: 101,
+      message_thread_id: 11
+    })
+  );
+  await runtime.handleMessage(
+    buildTextMessage("thread two", "AllowedUser", 1001, {
+      message_id: 202,
+      message_thread_id: 22
+    })
+  );
+
+  assert.equal(runtime.sessions.size, 1);
+  assert.equal(runnerFactory.runs.length, 1);
+  assert.equal(runnerFactory.runs[0].params.message, "thread one");
+  assert.deepEqual(fakeBotApi.messages, [
+    {
+      chatId: 1001,
+      text: "Queued message 1.",
+      parseMode: "HTML",
+      directMessagesTopicId: 22,
+      messageThreadId: 22
+    }
+  ]);
+
+  await runnerFactory.runs[0].emit({
+    type: "thread.started",
+    thread_id: "session-1"
+  });
+  await runnerFactory.runs[0].emit({
+    type: "item.completed",
+    item: {
+      id: "item_1",
+      type: "agent_message",
+      text: "answer one"
+    }
+  });
+  runnerFactory.runs[0].finish();
+  await waitFor(() => runnerFactory.runs.length === 2, 20);
+
+  assert.equal(runnerFactory.runs[1].params.sessionId, "session-1");
+  assert.equal(runnerFactory.runs[1].params.message, "thread two");
+
+  await runnerFactory.runs[1].emit({
+    type: "item.completed",
+    item: {
+      id: "item_2",
+      type: "agent_message",
+      text: "answer two"
+    }
+  });
+  runnerFactory.runs[1].finish();
+  await waitFor(() => fakeBotApi.messages.some((message) => message.text === "answer two"), 20);
+
+  assert.deepEqual(
+    fakeBotApi.messages.filter((message) => message.text?.startsWith("answer ")),
+    [
+      {
+        chatId: 1001,
+        text: "answer one",
+        parseMode: "HTML",
+        directMessagesTopicId: 11,
+        messageThreadId: 11
+      },
+      {
+        chatId: 1001,
+        text: "answer two",
+        parseMode: "HTML",
+        directMessagesTopicId: 22,
+        messageThreadId: 22
+      }
+    ]
+  );
+});
+
+test("runtime routes first private topic message without quoting it", async () => {
+  const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
+
+  await runtime.handleMessage(
+    buildTextMessage("first topic message", "AllowedUser", 1001, {
+      message_id: 101,
+      message_thread_id: 11
+    })
+  );
+
+  assert.equal(runnerFactory.runs.length, 1);
+  assert.deepEqual(fakeBotApi.actions, [
+    {
+      chatId: 1001,
+      action: "typing",
+      directMessagesTopicId: 11,
+      messageThreadId: 11
+    }
+  ]);
+
+  await runnerFactory.runs[0].emit({
+    type: "item.completed",
+    item: {
+      id: "item_1",
+      type: "agent_message",
+      text: "topic answer"
+    }
+  });
+  runnerFactory.runs[0].finish();
+  await waitFor(() => fakeBotApi.messages.some((message) => message.text === "topic answer"), 20);
+
+  assert.deepEqual(fakeBotApi.messages.at(-1), {
+    chatId: 1001,
+    text: "topic answer",
+    parseMode: "HTML",
+    directMessagesTopicId: 11,
+    messageThreadId: 11
+  });
+});
+
+test("runtime routes existing private topic messages with Telegram message_thread_id", async () => {
+  const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
+
+  await runtime.handleMessage(
+    buildTextMessage("existing topic message", "AllowedUser", 1001, {
+      message_id: 101,
+      message_thread_id: 33,
+      direct_messages_topic: { topic_id: 22 }
+    })
+  );
+
+  assert.equal(runnerFactory.runs.length, 1);
+  assert.deepEqual(fakeBotApi.actions, [
+    {
+      chatId: 1001,
+      action: "typing",
+      messageThreadId: 33,
+      directMessagesTopicId: 22
+    }
+  ]);
+
+  await runnerFactory.runs[0].emit({
+    type: "item.started",
+    item: {
+      id: "item_1",
+      type: "reasoning"
+    }
+  });
+  await waitFor(() => fakeBotApi.messages.some((message) => message.text === "🟢 reasoning"), 20);
+
+  await runnerFactory.runs[0].emit({
+    type: "item.completed",
+    item: {
+      id: "item_2",
+      type: "agent_message",
+      text: "existing topic answer"
+    }
+  });
+  runnerFactory.runs[0].finish();
+  await waitFor(() => fakeBotApi.edits.some((message) => message.text === "existing topic answer"), 20);
+
+  assert.deepEqual(fakeBotApi.messages.at(-1), {
+    chatId: 1001,
+    text: "🟢 reasoning",
+    parseMode: "HTML",
+    directMessagesTopicId: 22,
+    messageThreadId: 33
+  });
+  assert.deepEqual(fakeBotApi.edits.at(-1), {
+    chatId: 1001,
+    messageId: 1,
+    text: "existing topic answer",
+    parseMode: "HTML"
+  });
 });
 
 test("runtime keeps separate sessions for different private chats", async () => {

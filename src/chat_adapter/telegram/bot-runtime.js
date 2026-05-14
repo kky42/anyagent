@@ -1,6 +1,6 @@
 import { DEFAULT_CACHE_PATH, normalizeTelegramUsername, sleep, toErrorMessage } from "../../utils.js";
 import { ALBUM_QUIET_PERIOD_MS, hasSupportedAttachment, unsupportedAttachmentMessage } from "./attachments.js";
-import { ChatSession } from "./chat-session.js";
+import { ChatSession, replyTargetFromTelegramMessage } from "./chat-session.js";
 import { routeTextMessage } from "./command-router.js";
 import { MediaGroupBuffer } from "./media-group-buffer.js";
 import { NOOP_CONFIG_STORE } from "./session-persistence.js";
@@ -26,6 +26,19 @@ function unauthorizedMessage(user) {
   }
 
   return "You are not authorized to use this bot. Your Telegram account has no username set. Add one in Telegram Settings, then add it to allowedUsernames in this Telegram binding.";
+}
+
+const IGNORED_SERVICE_MESSAGE_FIELDS = [
+  "forum_topic_created",
+  "forum_topic_closed",
+  "forum_topic_reopened",
+  "forum_topic_edited",
+  "general_forum_topic_hidden",
+  "general_forum_topic_unhidden"
+];
+
+function isIgnoredServiceMessage(message) {
+  return IGNORED_SERVICE_MESSAGE_FIELDS.some((field) => message?.[field]);
 }
 
 export class BotRuntime {
@@ -127,21 +140,24 @@ export class BotRuntime {
     await session.sendText(text);
   }
 
-  async handleClearCache(chatId) {
+  async handleClearCache(chatId, options = {}) {
     const session = this.sessionFor(chatId);
     if (this.hasPendingBotWork()) {
-      await session.sendText("Cannot clear cache while runs, queued turns, or media albums are pending.");
+      await session.sendText(
+        "Cannot clear cache while runs, queued turns, or media albums are pending.",
+        options
+      );
       return;
     }
 
     try {
       await session.clearCache();
     } catch (error) {
-      await session.sendText(`Failed to clear cache: ${toErrorMessage(error)}`);
+      await session.sendText(`Failed to clear cache: ${toErrorMessage(error)}`, options);
       return;
     }
 
-    await session.sendText("Cleared cache for this chat.");
+    await session.sendText("Cleared cache for this chat.", options);
   }
 
   async handleMessage(message) {
@@ -160,7 +176,12 @@ export class BotRuntime {
       return;
     }
 
+    if (isIgnoredServiceMessage(message)) {
+      return;
+    }
+
     const session = this.sessionFor(chatId);
+    const replyTarget = replyTargetFromTelegramMessage(message);
     if (hasSupportedAttachment(message)) {
       await this.mediaGroupBuffer.queue(session, message);
       return;
@@ -172,12 +193,13 @@ export class BotRuntime {
         text,
         botUsername: this.botUsername,
         session,
-        runtime: this
+        runtime: this,
+        replyTarget
       });
       return;
     }
 
-    await session.sendText(unsupportedAttachmentMessage());
+    await session.sendText(unsupportedAttachmentMessage(), { replyTarget });
   }
 
   async handleUpdate(update) {

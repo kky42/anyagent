@@ -119,6 +119,9 @@ Useful PM2 commands:
 - Only private chats are supported.
 - Startup discards pending Telegram updates so messages and slash commands sent while the relay was stopped are not processed after restart.
 - Each `(Telegram bot, chat)` pair has its own in-memory queue, `sessionId`, and usage state.
+- Telegram thread/topic identifiers are not part of the agent session key. Multiple threads in the same private chat share one agent context and queue, while each turn's queued notice, progress, final response, errors, and generated attachments are sent back to the thread or direct-message topic that produced that turn.
+- Typing indicators are best-effort in Telegram private chat threads. The relay sends `sendChatAction` with the topic target, and Telegram clients can show the bot as typing in the root private chat, but Telegram Desktop and iOS currently do not render that typing state inside the thread window itself. Streaming/progress messages are the reliable live feedback path for threaded private chats.
+- Telegram replies are routed by topic fields only. The relay does not send `reply_parameters`, so bot responses do not visually quote the user's input message.
 - Supported Telegram attachments are `photo`, `document`, `video`, `audio`, `voice`, and `animation`.
 - Supported attachments are downloaded to `~/.anyagent/cache/<scope-hash>/...` and passed to every agent by local file path in the prompt. The scope hash is derived from the agent, platform, Telegram bot username, and chat id.
 - Attachment paths are rendered as `<attachments>` XML blocks with one `<attachment path="..." kind="..." />` entry per downloaded file, including photos.

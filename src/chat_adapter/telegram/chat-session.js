@@ -35,6 +35,40 @@ function normalizeCaption(value) {
   return String(value ?? "").trim();
 }
 
+export function replyTargetFromTelegramMessage(message) {
+  const target = {};
+  const messageThreadId = message?.message_thread_id;
+  const directMessagesTopicId = message?.direct_messages_topic?.topic_id;
+  const isPrivateChat = message?.chat?.type === "private";
+
+  if (messageThreadId !== null && messageThreadId !== undefined) {
+    target.messageThreadId = messageThreadId;
+  }
+  if (
+    directMessagesTopicId !== null &&
+    directMessagesTopicId !== undefined
+  ) {
+    target.directMessagesTopicId = directMessagesTopicId;
+  }
+  if (
+    isPrivateChat &&
+    target.directMessagesTopicId === undefined &&
+    messageThreadId !== null &&
+    messageThreadId !== undefined
+  ) {
+    target.directMessagesTopicId = messageThreadId;
+  }
+  if (
+    isPrivateChat &&
+    target.messageThreadId === undefined &&
+    directMessagesTopicId !== null &&
+    directMessagesTopicId !== undefined
+  ) {
+    target.messageThreadId = directMessagesTopicId;
+  }
+  return Object.keys(target).length > 0 ? target : null;
+}
+
 /**
  * @typedef {import("../../cli_adapter/turn-input.js").Turn} Turn
  */
@@ -62,6 +96,7 @@ export class ChatSession {
     this.queue = [];
     this.isRunning = false;
     this.activeRun = null;
+    this.activeReplyTarget = null;
     this.typingTimer = null;
     this.usesDefaultRunFactory = !createAgentRun && !createCodexRun;
     this.createAgentRun =
@@ -135,47 +170,49 @@ export class ChatSession {
     this.messageRenderer.resetTransientState();
   }
 
-  sendMessageChunk(rawChunk) {
-    return this.messageRenderer.sendMessageChunk(rawChunk);
+  sendMessageChunk(rawChunk, options = {}) {
+    return this.messageRenderer.sendMessageChunk(rawChunk, options);
   }
 
-  editMessageChunk(messageId, rawChunk) {
-    return this.messageRenderer.editMessageChunk(messageId, rawChunk);
+  editMessageChunk(messageId, rawChunk, options = {}) {
+    return this.messageRenderer.editMessageChunk(messageId, rawChunk, options);
   }
 
-  sendSplitText(rawText) {
-    return this.messageRenderer.sendSplitText(rawText);
+  sendSplitText(rawText, options = {}) {
+    return this.messageRenderer.sendSplitText(rawText, options);
   }
 
-  renderProgressText(text) {
-    return this.messageRenderer.renderProgressText(text);
+  renderProgressText(text, options = {}) {
+    return this.messageRenderer.renderProgressText(text, options);
   }
 
   clearProgressMessage() {
     return this.messageRenderer.clearProgressMessage();
   }
 
-  renderFinalMessage(text) {
+  renderFinalMessage(text, options = {}) {
     return this.messageRenderer.renderFinalMessage(text, {
+      ...options,
       workdir: this.workdir
     });
   }
 
-  renderErrorText(text) {
-    return this.messageRenderer.renderErrorText(text);
+  renderErrorText(text, options = {}) {
+    return this.messageRenderer.renderErrorText(text, options);
   }
 
-  sendText(text) {
-    return this.messageRenderer.sendText(text);
+  sendText(text, options = {}) {
+    return this.messageRenderer.sendText(text, options);
   }
 
-  sendCodexOutput(text) {
+  sendCodexOutput(text, options = {}) {
     return this.messageRenderer.sendCodexOutput(text, {
+      ...options,
       workdir: this.workdir
     });
   }
 
-  startTyping() {
+  startTyping(replyTarget = this.activeReplyTarget) {
     if (this.typingTimer) {
       return;
     }
@@ -184,7 +221,8 @@ export class ChatSession {
       try {
         await this.botApi.sendChatAction({
           chatId: this.chatId,
-          action: "typing"
+          action: "typing",
+          ...replyTarget
         });
       } catch (error) {
         this.logger(`typing indicator failed: ${toErrorMessage(error)}`);
@@ -225,7 +263,7 @@ export class ChatSession {
   normalizeTurn(turn) {
     if (typeof turn === "string") {
       const promptText = String(turn).trim();
-      return promptText ? { promptText, attachments: [] } : null;
+      return promptText ? { promptText, attachments: [], replyTarget: null } : null;
     }
 
     const promptText = String(turn?.promptText ?? "").trim();
@@ -236,7 +274,8 @@ export class ChatSession {
 
     return {
       promptText,
-      attachments
+      attachments,
+      replyTarget: turn?.replyTarget ?? null
     };
   }
 
@@ -341,12 +380,14 @@ export class ChatSession {
     if (!Array.isArray(messages) || messages.length === 0) {
       return;
     }
+    const replyTarget = replyTargetFromTelegramMessage(messages[0]);
 
     try {
       const turn = await this.buildAttachmentTurn(messages);
+      turn.replyTarget = replyTarget;
       await this.enqueueTurn(turn);
     } catch (error) {
-      await this.sendText(toErrorMessage(error));
+      await this.sendText(toErrorMessage(error), { replyTarget });
     }
   }
 
@@ -387,10 +428,10 @@ export class ChatSession {
     }
   }
 
-  async handleWorkdir(args) {
+  async handleWorkdir(args, options = {}) {
     const requestedWorkdir = normalizeSettingArgument(args);
     if (!requestedWorkdir) {
-      await this.sendText(`Current workdir: ${this.workdir}.`);
+      await this.sendText(`Current workdir: ${this.workdir}.`, options);
       return;
     }
 
@@ -400,15 +441,15 @@ export class ChatSession {
       normalizedWorkdir = expandWorkdirPath(requestedWorkdir, { homeDir });
     } catch (error) {
       if (error instanceof Error && error.message === INVALID_WORKDIR_MESSAGE) {
-        await this.sendText(this.workdirValidationError());
+        await this.sendText(this.workdirValidationError(), options);
         return;
       }
-      await this.sendText(toErrorMessage(error));
+      await this.sendText(toErrorMessage(error), options);
       return;
     }
 
     if (normalizedWorkdir === this.workdir) {
-      await this.sendText(`Workdir is already set to ${normalizedWorkdir}.`);
+      await this.sendText(`Workdir is already set to ${normalizedWorkdir}.`, options);
       return;
     }
 
@@ -416,7 +457,7 @@ export class ChatSession {
     try {
       nextWorkdir = await this.resolveRequestedWorkdir(normalizedWorkdir);
     } catch (error) {
-      await this.sendText(toErrorMessage(error));
+      await this.sendText(toErrorMessage(error), options);
       return;
     }
 
@@ -425,24 +466,25 @@ export class ChatSession {
     await this.clearPersistedState();
 
     await this.sendText(
-      `Workdir set to ${nextWorkdir}. Started a new session. The next message will open a fresh ${this.cliAdapter.displayName} session.`
+      `Workdir set to ${nextWorkdir}. Started a new session. The next message will open a fresh ${this.cliAdapter.displayName} session.`,
+      options
     );
   }
 
-  async handleCli(args) {
+  async handleCli(args, options = {}) {
     const normalizedCli = normalizeSettingArgument(args)?.toLowerCase();
     if (!normalizedCli) {
-      await this.sendText(`Current CLI: ${this.cliAdapter.id}.`);
+      await this.sendText(`Current CLI: ${this.cliAdapter.id}.`, options);
       return;
     }
 
     if (!SUPPORTED_AGENT_CLIS.includes(normalizedCli)) {
-      await this.sendText(`Unknown CLI. Use /cli ${CLI_COMMAND_CHOICES.join("|")}.`);
+      await this.sendText(`Unknown CLI. Use /cli ${CLI_COMMAND_CHOICES.join("|")}.`, options);
       return;
     }
 
     if (normalizedCli === this.cliAdapter.id) {
-      await this.sendText(`CLI is already set to ${normalizedCli}.`);
+      await this.sendText(`CLI is already set to ${normalizedCli}.`, options);
       return;
     }
 
@@ -458,7 +500,8 @@ export class ChatSession {
     await this.clearPersistedState();
 
     await this.sendText(
-      `CLI set to ${normalizedCli}. Started a new session. The next message will open a fresh ${this.cliAdapter.displayName} session.`
+      `CLI set to ${normalizedCli}. Started a new session. The next message will open a fresh ${this.cliAdapter.displayName} session.`,
+      options
     );
   }
 
@@ -477,20 +520,23 @@ export class ChatSession {
     });
   }
 
-  async handleStatus() {
-    await this.sendText(this.statusText());
+  async handleStatus(options = {}) {
+    await this.sendText(this.statusText(), options);
   }
 
-  async handleAuto(args) {
+  async handleAuto(args, options = {}) {
     const normalized = String(args || "").trim();
     if (!normalized) {
-      await this.sendText(`Current auto level: ${formatAuto(this.auto)}.`);
+      await this.sendText(`Current auto level: ${formatAuto(this.auto)}.`, options);
       return;
     }
 
     const nextAuto = parseAutoArgument(normalized);
     if (nextAuto === null) {
-      await this.sendText("Unknown auto level. Use /auto, /auto low, /auto medium, or /auto high.");
+      await this.sendText(
+        "Unknown auto level. Use /auto, /auto low, /auto medium, or /auto high.",
+        options
+      );
       return;
     }
 
@@ -498,24 +544,25 @@ export class ChatSession {
     try {
       await this.applyRuntimeSettings({ auto: nextAuto });
     } catch (error) {
-      await this.sendText(`Failed to persist auto level: ${toErrorMessage(error)}`);
+      await this.sendText(`Failed to persist auto level: ${toErrorMessage(error)}`, options);
       return;
     }
 
     if (this.isRunning) {
       await this.sendText(
-        `Auto level set to ${formatAuto(nextAuto)}. The current run stays on ${formatAuto(previousAuto)}; the next run will use ${formatAuto(nextAuto)}.`
+        `Auto level set to ${formatAuto(nextAuto)}. The current run stays on ${formatAuto(previousAuto)}; the next run will use ${formatAuto(nextAuto)}.`,
+        options
       );
       return;
     }
 
-    await this.sendText(`Auto level set to ${formatAuto(nextAuto)}.`);
+    await this.sendText(`Auto level set to ${formatAuto(nextAuto)}.`, options);
   }
 
-  async handleModel(args) {
+  async handleModel(args, options = {}) {
     const nextModel = normalizeSettingArgument(args);
     if (!nextModel) {
-      await this.sendText(`Current model: ${this.model}.`);
+      await this.sendText(`Current model: ${this.model}.`, options);
       return;
     }
 
@@ -523,24 +570,25 @@ export class ChatSession {
     try {
       await this.applyRuntimeSettings({ model: nextModel });
     } catch (error) {
-      await this.sendText(`Failed to persist model setting: ${toErrorMessage(error)}`);
+      await this.sendText(`Failed to persist model setting: ${toErrorMessage(error)}`, options);
       return;
     }
 
     if (this.isRunning) {
       await this.sendText(
-        `Model set to ${nextModel}. The current run stays on ${previousModel}; the next run will use ${nextModel}.`
+        `Model set to ${nextModel}. The current run stays on ${previousModel}; the next run will use ${nextModel}.`,
+        options
       );
       return;
     }
 
-    await this.sendText(`Model set to ${nextModel}.`);
+    await this.sendText(`Model set to ${nextModel}.`, options);
   }
 
-  async handleReasoningEffort(args) {
+  async handleReasoningEffort(args, options = {}) {
     const nextReasoningEffort = normalizeSettingArgument(args);
     if (!nextReasoningEffort) {
-      await this.sendText(`Current reasoning effort: ${this.reasoningEffort}.`);
+      await this.sendText(`Current reasoning effort: ${this.reasoningEffort}.`, options);
       return;
     }
 
@@ -548,18 +596,22 @@ export class ChatSession {
     try {
       await this.applyRuntimeSettings({ reasoningEffort: nextReasoningEffort });
     } catch (error) {
-      await this.sendText(`Failed to persist reasoning effort setting: ${toErrorMessage(error)}`);
+      await this.sendText(
+        `Failed to persist reasoning effort setting: ${toErrorMessage(error)}`,
+        options
+      );
       return;
     }
 
     if (this.isRunning) {
       await this.sendText(
-        `Reasoning effort set to ${nextReasoningEffort}. The current run stays on ${previousReasoningEffort}; the next run will use ${nextReasoningEffort}.`
+        `Reasoning effort set to ${nextReasoningEffort}. The current run stays on ${previousReasoningEffort}; the next run will use ${nextReasoningEffort}.`,
+        options
       );
       return;
     }
 
-    await this.sendText(`Reasoning effort set to ${nextReasoningEffort}.`);
+    await this.sendText(`Reasoning effort set to ${nextReasoningEffort}.`, options);
   }
 
   async abortCurrentRun() {
@@ -576,22 +628,24 @@ export class ChatSession {
     return true;
   }
 
-  async handleAbort() {
+  async handleAbort(options = {}) {
     const wasRunning = this.isRunning;
     await resetSession(this);
     await this.sendText(
-      wasRunning ? "Aborted current run and cleared the queue." : "No active run. Queue cleared."
+      wasRunning ? "Aborted current run and cleared the queue." : "No active run. Queue cleared.",
+      options
     );
   }
 
-  async handleNewSession() {
+  async handleNewSession(options = {}) {
     await resetSession(this, { clearPersistedState: true });
     await this.sendText(
-      `Started a new session. The next message will open a fresh ${this.cliAdapter.displayName} session.`
+      `Started a new session. The next message will open a fresh ${this.cliAdapter.displayName} session.`,
+      options
     );
   }
 
-  async handleReset() {
+  async handleReset(options = {}) {
     let reloadedBotConfig;
     try {
       reloadedBotConfig = await this.configStore.loadTelegramBotConfig({
@@ -599,7 +653,7 @@ export class ChatSession {
         username: this.botConfig.username
       });
     } catch (error) {
-      await this.sendText(`Failed to reload bot config: ${toErrorMessage(error)}`);
+      await this.sendText(`Failed to reload bot config: ${toErrorMessage(error)}`, options);
       return;
     }
 
@@ -616,7 +670,8 @@ export class ChatSession {
     await this.resetChatToBotDefaults();
 
     await this.sendText(
-      `Reset current chat to config defaults. Started a new session with CLI ${this.cli}, workdir ${this.workdir}, auto ${formatAuto(this.auto)}, model ${this.model}, reasoning effort ${this.reasoningEffort}.`
+      `Reset current chat to config defaults. Started a new session with CLI ${this.cli}, workdir ${this.workdir}, auto ${formatAuto(this.auto)}, model ${this.model}, reasoning effort ${this.reasoningEffort}.`,
+      options
     );
   }
 
@@ -628,7 +683,9 @@ export class ChatSession {
 
     if (this.isRunning) {
       this.queue.push(normalizedTurn);
-      await this.sendText(`Queued message ${this.queue.length}.`);
+      await this.sendText(`Queued message ${this.queue.length}.`, {
+        replyTarget: normalizedTurn.replyTarget
+      });
       return;
     }
 
@@ -636,10 +693,11 @@ export class ChatSession {
     void this.drainQueue();
   }
 
-  async enqueueMessage(text) {
+  async enqueueMessage(text, options = {}) {
     await this.enqueueTurn({
       promptText: text,
-      attachments: []
+      attachments: [],
+      replyTarget: options.replyTarget ?? null
     });
   }
 
@@ -654,7 +712,8 @@ export class ChatSession {
     }
 
     this.isRunning = true;
-    this.startTyping();
+    this.activeReplyTarget = nextTurn.replyTarget;
+    this.startTyping(nextTurn.replyTarget);
     this.resetTransientTurnState();
 
     let emittedError = false;
@@ -711,16 +770,16 @@ export class ChatSession {
             continue;
           }
           if (action.kind === "progress") {
-            await this.renderProgressText(action.text);
+            await this.renderProgressText(action.text, { replyTarget: nextTurn.replyTarget });
             continue;
           }
           if (action.kind === "error") {
             emittedError = true;
-            await this.renderErrorText(action.text);
+            await this.renderErrorText(action.text, { replyTarget: nextTurn.replyTarget });
             continue;
           }
           if (action.kind === "message") {
-            await this.renderFinalMessage(action.text);
+            await this.renderFinalMessage(action.text, { replyTarget: nextTurn.replyTarget });
           }
         }
       },
@@ -749,12 +808,20 @@ export class ChatSession {
         await this.clearProgressMessage();
       }
       if (!result.sawTerminalEvent && !emittedError) {
-        await this.renderErrorText(`${runCliAdapter.displayName} exited without a terminal JSON event.`);
+        await this.renderErrorText(
+          `${runCliAdapter.displayName} exited without a terminal JSON event.`,
+          {
+            replyTarget: nextTurn.replyTarget
+          }
+        );
       }
     } catch (error) {
-      await this.renderErrorText(`${runCliAdapter.displayName} process error: ${toErrorMessage(error)}`);
+      await this.renderErrorText(`${runCliAdapter.displayName} process error: ${toErrorMessage(error)}`, {
+        replyTarget: nextTurn.replyTarget
+      });
     } finally {
       this.activeRun = null;
+      this.activeReplyTarget = null;
       this.isRunning = false;
       this.stopTyping();
       this.resetTransientTurnState();

@@ -103,6 +103,20 @@ function buildRenderAttempts(rawChunk) {
   ];
 }
 
+function outboundMessageTarget(replyTarget) {
+  if (!replyTarget) {
+    return {};
+  }
+  const target = {};
+  if (replyTarget.directMessagesTopicId !== null && replyTarget.directMessagesTopicId !== undefined) {
+    target.directMessagesTopicId = replyTarget.directMessagesTopicId;
+  }
+  if (replyTarget.messageThreadId !== null && replyTarget.messageThreadId !== undefined) {
+    target.messageThreadId = replyTarget.messageThreadId;
+  }
+  return target;
+}
+
 export class MessageRenderer {
   constructor({ botApi, chatId }) {
     this.botApi = botApi;
@@ -162,7 +176,8 @@ export class MessageRenderer {
         this.botApi.sendMessage({
           chatId: this.chatId,
           text,
-          parseMode
+          parseMode,
+          ...outboundMessageTarget(options.replyTarget)
         })
     });
   }
@@ -194,7 +209,7 @@ export class MessageRenderer {
     return firstMessageId;
   }
 
-  async renderProgressText(text) {
+  async renderProgressText(text, options = {}) {
     const rawText = String(text ?? "").trim();
     if (!rawText) {
       return;
@@ -208,7 +223,7 @@ export class MessageRenderer {
     if (this.progressMessageId) {
       await this.editMessageChunk(this.progressMessageId, displayText);
     } else {
-      this.progressMessageId = await this.sendSplitText(displayText);
+      this.progressMessageId = await this.sendSplitText(displayText, options);
     }
 
     this.lastRenderedProgressText = displayText;
@@ -244,7 +259,8 @@ export class MessageRenderer {
       chatId: this.chatId,
       kind: attachment.kind,
       filePath,
-      fileName: attachment.fileName || path.basename(filePath)
+      fileName: attachment.fileName || path.basename(filePath),
+      ...outboundMessageTarget(options.replyTarget)
     });
   }
 
@@ -306,7 +322,7 @@ export class MessageRenderer {
   }
 
   async renderOutputSegments(segments, options = {}) {
-    const deliverText = options.deliverText ?? ((text) => this.sendText(text));
+    const deliverText = options.deliverText ?? ((text) => this.sendText(text, options));
     let hasVisibleOutput = false;
 
     for (const segment of segments) {
@@ -342,7 +358,11 @@ export class MessageRenderer {
     const segments = parseOutputSegments(String(text ?? ""));
     await this.renderOutputSegments(segments, {
       ...options,
-      deliverText: (rawText) => this.sendText(rawText, { renderMarkdown: true })
+      deliverText: (rawText) =>
+        this.sendText(rawText, {
+          ...options,
+          renderMarkdown: true
+        })
     });
   }
 
@@ -351,12 +371,16 @@ export class MessageRenderer {
     await this.renderOutputSegments(segments, {
       ...options,
       clearProgressAfterFirstAttachment: true,
-      deliverText: (rawText) => this.renderTerminalText(rawText, { renderMarkdown: true })
+      deliverText: (rawText) =>
+        this.renderTerminalText(rawText, {
+          ...options,
+          renderMarkdown: true
+        })
     });
   }
 
-  async renderErrorText(text) {
-    await this.renderTerminalText(String(text ?? "").trim());
+  async renderErrorText(text, options = {}) {
+    await this.renderTerminalText(String(text ?? "").trim(), options);
   }
 
   async sendText(text, options = {}) {

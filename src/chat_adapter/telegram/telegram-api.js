@@ -43,6 +43,93 @@ export class TelegramBotApi {
     return this.parseResponse(method, response);
   }
 
+  isThreadNotFoundError(error) {
+    return (
+      error instanceof TelegramApiError &&
+      error.errorCode === 400 &&
+      /message thread not found/i.test(error.message)
+    );
+  }
+
+  hasThreadRoutingField(payload) {
+    if (!payload) {
+      return false;
+    }
+
+    if (typeof payload.has === "function") {
+      return payload.has("message_thread_id") || payload.has("direct_messages_topic_id");
+    }
+
+    return (
+      (payload.message_thread_id !== null && payload.message_thread_id !== undefined) ||
+      (payload.direct_messages_topic_id !== null &&
+        payload.direct_messages_topic_id !== undefined)
+    );
+  }
+
+  cloneThreadRoutingPayload(payload) {
+    if (typeof payload?.has === "function") {
+      const clone = new FormData();
+      for (const [key, value] of payload.entries()) {
+        clone.append(key, value);
+      }
+      return clone;
+    }
+
+    return { ...payload };
+  }
+
+  swapThreadRoutingPayload(payload) {
+    if (typeof payload?.has === "function") {
+      if (payload.has("message_thread_id")) {
+        const threadId = payload.get("message_thread_id");
+        payload.delete("message_thread_id");
+        payload.set("direct_messages_topic_id", String(threadId));
+      } else if (payload.has("direct_messages_topic_id")) {
+        const directMessagesTopicId = payload.get("direct_messages_topic_id");
+        payload.delete("direct_messages_topic_id");
+        payload.set("message_thread_id", String(directMessagesTopicId));
+      }
+      return payload;
+    }
+
+    if (payload.message_thread_id !== null && payload.message_thread_id !== undefined) {
+      payload.direct_messages_topic_id = payload.message_thread_id;
+      delete payload.message_thread_id;
+    } else if (
+      payload.direct_messages_topic_id !== null &&
+      payload.direct_messages_topic_id !== undefined
+    ) {
+      payload.message_thread_id = payload.direct_messages_topic_id;
+      delete payload.direct_messages_topic_id;
+    }
+
+    return payload;
+  }
+
+  async callWithThreadFallback(method, payload, options = {}) {
+    const invoke =
+      typeof payload?.has === "function"
+        ? (requestPayload) => this.callMultipart(method, requestPayload, options)
+        : (requestPayload) => this.call(method, requestPayload, options);
+
+    try {
+      return await invoke(payload);
+    } catch (error) {
+      if (
+        !this.isThreadNotFoundError(error) ||
+        !this.hasThreadRoutingField(payload)
+      ) {
+        throw error;
+      }
+
+      const fallbackPayload = this.cloneThreadRoutingPayload(payload);
+      this.swapThreadRoutingPayload(fallbackPayload);
+
+      return invoke(fallbackPayload);
+    }
+  }
+
   async parseResponse(method, response) {
     let body;
     try {
@@ -89,7 +176,13 @@ export class TelegramBotApi {
     return this.call("getUpdates", payload, options);
   }
 
-  sendMessage({ chatId, text, parseMode = null }, options = {}) {
+  sendMessage({
+    chatId,
+    text,
+    parseMode = null,
+    messageThreadId = null,
+    directMessagesTopicId = null
+  }, options = {}) {
     const payload = {
       chat_id: chatId,
       text,
@@ -99,8 +192,13 @@ export class TelegramBotApi {
     if (parseMode) {
       payload.parse_mode = parseMode;
     }
+    if (messageThreadId !== null && messageThreadId !== undefined) {
+      payload.message_thread_id = messageThreadId;
+    } else if (directMessagesTopicId !== null && directMessagesTopicId !== undefined) {
+      payload.direct_messages_topic_id = directMessagesTopicId;
+    }
 
-    return this.call("sendMessage", payload, options);
+    return this.callWithThreadFallback("sendMessage", payload, options);
   }
 
   editMessageText({ chatId, messageId, text, parseMode = null }, options = {}) {
@@ -130,7 +228,16 @@ export class TelegramBotApi {
   }
 
   async sendLocalAttachment(
-    { chatId, kind, filePath, fileName = null, caption = null, parseMode = null },
+    {
+      chatId,
+      kind,
+      filePath,
+      fileName = null,
+      caption = null,
+      parseMode = null,
+      messageThreadId = null,
+      directMessagesTopicId = null
+    },
     options = {}
   ) {
     const target = OUTBOUND_ATTACHMENT_TARGETS[kind];
@@ -154,19 +261,30 @@ export class TelegramBotApi {
     if (parseMode) {
       formData.append("parse_mode", parseMode);
     }
+    if (messageThreadId !== null && messageThreadId !== undefined) {
+      formData.append("message_thread_id", String(messageThreadId));
+    } else if (directMessagesTopicId !== null && directMessagesTopicId !== undefined) {
+      formData.append("direct_messages_topic_id", String(directMessagesTopicId));
+    }
 
-    return this.callMultipart(target.method, formData, options);
+    return this.callWithThreadFallback(target.method, formData, options);
   }
 
-  sendChatAction({ chatId, action = "typing" }, options = {}) {
-    return this.call(
-      "sendChatAction",
-      {
-        chat_id: chatId,
-        action
-      },
-      options
-    );
+  sendChatAction({
+    chatId,
+    action = "typing",
+    messageThreadId = null,
+    directMessagesTopicId = null
+  }, options = {}) {
+    const payload = {
+      chat_id: chatId,
+      action
+    };
+    if (messageThreadId !== null && messageThreadId !== undefined) {
+      payload.message_thread_id = messageThreadId;
+    }
+
+    return this.callWithThreadFallback("sendChatAction", payload, options);
   }
 
   async downloadFile(filePath, options = {}) {
