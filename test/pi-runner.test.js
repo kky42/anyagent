@@ -48,7 +48,7 @@ test("buildPiArgs maps auto modes to pi-sandbox flags only when supported", () =
     "--mode",
     "json",
     "--sandbox",
-    "readonly",
+    "read-only",
     "hello"
   ]);
 
@@ -61,7 +61,7 @@ test("buildPiArgs maps auto modes to pi-sandbox flags only when supported", () =
     "--mode",
     "json",
     "--sandbox",
-    "on",
+    "workspace-write",
     "hello"
   ]);
 
@@ -74,7 +74,7 @@ test("buildPiArgs maps auto modes to pi-sandbox flags only when supported", () =
     "--mode",
     "json",
     "--sandbox",
-    "off",
+    "danger-full-access",
     "hello"
   ]);
 
@@ -170,7 +170,7 @@ process.stdout.write(JSON.stringify({ args: process.argv.slice(2), cwd: process.
         "--mode",
         "json",
         "--sandbox",
-        "readonly",
+        "read-only",
         "hello"
       ],
       cwd: await fs.realpath(workdir)

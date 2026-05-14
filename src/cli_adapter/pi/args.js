@@ -11,9 +11,9 @@ import {
 } from "../../runtime-settings.js";
 
 const PI_SANDBOX_MODES = {
-  [AUTO_LEVEL_LOW]: "readonly",
-  [AUTO_LEVEL_MEDIUM]: "on",
-  [AUTO_LEVEL_HIGH]: "off"
+  [AUTO_LEVEL_LOW]: "read-only",
+  [AUTO_LEVEL_MEDIUM]: "workspace-write",
+  [AUTO_LEVEL_HIGH]: "danger-full-access"
 };
 
 /**

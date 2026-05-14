@@ -118,7 +118,7 @@ Useful PM2 commands:
 - Claude fresh prompts use `claude -p --output-format stream-json`; continued prompts use `claude -p --output-format stream-json --resume <session-id>`.
 - Pi fresh prompts use `pi -p --mode json`; continued prompts use `pi -p --mode json --session <session-id>`.
 - The relay maps `auto` to each CLI's permission model. Codex uses `read-only`, `workspace-write`, or dangerous bypass. Claude uses `dontAsk`, `acceptEdits`, or `--dangerously-skip-permissions`.
-- Pi uses `--sandbox readonly`, `--sandbox on`, or `--sandbox off` when the installed Pi extensions expose the `--sandbox` flag, such as `@kky42/pi-sandbox`. If the flag is not available, the relay starts Pi without sandbox arguments.
+- Pi uses `--sandbox read-only`, `--sandbox workspace-write`, or `--sandbox danger-full-access` when the installed Pi extensions expose the `--sandbox` flag, such as `@kky42/pi-sandbox`. If the flag is not available, the relay starts Pi without sandbox arguments.
 - Fresh interactive sessions inject only a relay attachment contract using `<attachments>` XML blocks; Telegram-specific formatting is handled by the relay. Claude receives this contract through `--append-system-prompt`.
 - The relay keeps `sessionId` and the latest `context_length` in memory for the chat while the process is running.
 - Codex `context_length` is derived from the final `token_count.last_token_usage` event in the Codex rollout file under `~/.codex/sessions/...`. Claude `context_length` is derived from the streamed result usage. Pi `context_length` is derived from the final assistant `usage.totalTokens` value in the JSON event stream or saved session file under `~/.pi/agent/sessions/...`.
