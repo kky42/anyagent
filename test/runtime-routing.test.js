@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { buildCacheScope } from "../src/chat_adapter/cache-scope.js";
 import { createRuntime } from "./support/builders.js";
 import { FakeBotApi } from "./support/fakes.js";
 import { waitFor } from "./support/async.js";
@@ -14,6 +15,16 @@ function buildTextMessage(text, username = "AllowedUser", chatId = 1001) {
     from: { id: 42, username },
     text
   };
+}
+
+function telegramScope(cacheRootDir, { agentId = "primary-agent", botUsername = "relaybot", chatId = 1001 } = {}) {
+  return buildCacheScope({
+    cacheRootDir,
+    agentId,
+    platform: "telegram",
+    bindingId: botUsername,
+    conversationId: chatId
+  });
 }
 
 test("unauthorized users are told which Telegram username to allow", async () => {
@@ -81,8 +92,8 @@ test("runtime aggregates media groups into one attachment turn", async () => {
 
   assert.match(runnerFactory.runs[0].params.message, /^compare these\n\n<attachments>/);
   assert.equal("imagePaths" in runnerFactory.runs[0].params, false);
-  assert.match(runnerFactory.runs[0].params.message, /msg101\.jpg" kind="photo"/);
-  assert.match(runnerFactory.runs[0].params.message, /msg102\.jpg" kind="photo"/);
+  assert.match(runnerFactory.runs[0].params.message, /photo--m101\.jpg" kind="photo"/);
+  assert.match(runnerFactory.runs[0].params.message, /photo--m102\.jpg" kind="photo"/);
   runnerFactory.runs[0].finish();
 });
 
@@ -101,20 +112,57 @@ test("runtime rejects unsupported non-text messages", async () => {
   );
 });
 
-test("runtime clears only the current bot cache", async () => {
+test("runtime writes different private chats to different attachment cache scopes", async () => {
+  const { runtime, fakeBotApi, cacheRootDir, runnerFactory } = await createRuntime();
+  const firstScope = telegramScope(cacheRootDir, { chatId: 1001 });
+  const secondScope = telegramScope(cacheRootDir, { chatId: 2002 });
+  fakeBotApi.registerFile("photo-1001", {
+    filePath: "photos/one.jpg",
+    body: Buffer.from("one")
+  });
+  fakeBotApi.registerFile("photo-2002", {
+    filePath: "photos/two.jpg",
+    body: Buffer.from("two")
+  });
+
+  await runtime.handleMessage({
+    message_id: 11,
+    chat: { id: 1001, type: "private" },
+    from: { id: 42, username: "AllowedUser" },
+    photo: [{ file_id: "photo-1001", file_unique_id: "photo-1001", file_size: 3, width: 100, height: 100 }]
+  });
+  await runtime.handleMessage({
+    message_id: 12,
+    chat: { id: 2002, type: "private" },
+    from: { id: 42, username: "AllowedUser" },
+    photo: [{ file_id: "photo-2002", file_unique_id: "photo-2002", file_size: 3, width: 100, height: 100 }]
+  });
+
+  assert.notEqual(firstScope.scopeDir, secondScope.scopeDir);
+  assert.equal(await fs.readFile(path.join(firstScope.scopeDir, "photo--m11.jpg"), "utf8"), "one");
+  assert.equal(await fs.readFile(path.join(secondScope.scopeDir, "photo--m12.jpg"), "utf8"), "two");
+  runnerFactory.runs[0].finish();
+  runnerFactory.runs[1].finish();
+});
+
+test("runtime clears only the current chat cache scope", async () => {
   const { runtime, fakeBotApi, cacheRootDir } = await createRuntime();
-  const primaryCacheDir = path.join(cacheRootDir, "telegram", "relaybot");
-  const secondaryCacheDir = path.join(cacheRootDir, "telegram", "otherbot");
-  await fs.mkdir(primaryCacheDir, { recursive: true });
-  await fs.mkdir(secondaryCacheDir, { recursive: true });
-  await fs.writeFile(path.join(primaryCacheDir, "one.txt"), "primary", "utf8");
-  await fs.writeFile(path.join(secondaryCacheDir, "two.txt"), "secondary", "utf8");
+  const currentScope = telegramScope(cacheRootDir, { chatId: 1001 });
+  const otherChatScope = telegramScope(cacheRootDir, { chatId: 2002 });
+  const otherBotScope = telegramScope(cacheRootDir, { botUsername: "otherbot", chatId: 1001 });
+  await fs.mkdir(currentScope.scopeDir, { recursive: true });
+  await fs.mkdir(otherChatScope.scopeDir, { recursive: true });
+  await fs.mkdir(otherBotScope.scopeDir, { recursive: true });
+  await fs.writeFile(path.join(currentScope.scopeDir, "one.txt"), "current", "utf8");
+  await fs.writeFile(path.join(otherChatScope.scopeDir, "two.txt"), "other-chat", "utf8");
+  await fs.writeFile(path.join(otherBotScope.scopeDir, "three.txt"), "other-bot", "utf8");
 
   await runtime.handleMessage(buildTextMessage("/clear_cache"));
 
-  await assert.rejects(() => fs.stat(primaryCacheDir));
-  assert.equal(await fs.readFile(path.join(secondaryCacheDir, "two.txt"), "utf8"), "secondary");
-  assert.equal(fakeBotApi.messages.at(-1).text, "Cleared cache for @relaybot.");
+  await assert.rejects(() => fs.stat(currentScope.scopeDir));
+  assert.equal(await fs.readFile(path.join(otherChatScope.scopeDir, "two.txt"), "utf8"), "other-chat");
+  assert.equal(await fs.readFile(path.join(otherBotScope.scopeDir, "three.txt"), "utf8"), "other-bot");
+  assert.equal(fakeBotApi.messages.at(-1).text, "Cleared cache for this chat.");
 });
 
 test("runtime routes /cli, /auto, /model, and /reasoning to the current chat session", async () => {

@@ -11,14 +11,13 @@ import { formatAuto, parseAutoArgument } from "../../auto-mode.js";
 import { SUPPORTED_AGENT_CLIS, cliAdapterFor } from "../../cli_adapter/index.js";
 import { buildTurnInputMessage } from "../../cli_adapter/turn-input.js";
 import { ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS } from "../output-instructions.js";
+import { buildCacheScope, ensureCacheScope } from "../cache-scope.js";
 import { renderStatusMessage } from "./render.js";
 import {
   normalizeSettingArgument
 } from "../../runtime-settings.js";
 import {
   DEFAULT_CACHE_PATH,
-  buildChatCacheDirName,
-  ensureDir,
   expandWorkdirPath,
   formatTokenCountK,
   INVALID_WORKDIR_MESSAGE,
@@ -205,12 +204,22 @@ export class ChatSession {
     }
   }
 
+  cacheScope() {
+    return buildCacheScope({
+      cacheRootDir: this.cacheRootDir,
+      agentId: this.botConfig.agent?.id,
+      platform: "telegram",
+      bindingId: this.botConfig.username,
+      conversationId: this.chatId
+    });
+  }
+
   cacheDir() {
-    return path.join(this.cacheRootDir, "telegram", this.botConfig.username);
+    return this.cacheScope().scopeDir;
   }
 
   chatCacheDir() {
-    return path.join(this.cacheDir(), buildChatCacheDirName(this.chatId));
+    return this.cacheDir();
   }
 
   normalizeTurn(turn) {
@@ -232,7 +241,34 @@ export class ChatSession {
   }
 
   async clearCache() {
-    await fs.rm(this.cacheDir(), { recursive: true, force: true });
+    await fs.rm(this.chatCacheDir(), { recursive: true, force: true });
+  }
+
+  async resolveAttachmentLocalPath(descriptor, filePath) {
+    const scope = this.cacheScope();
+    await ensureCacheScope(scope);
+
+    for (let collisionIndex = 1; collisionIndex <= 1000; collisionIndex += 1) {
+      const fileName = buildAttachmentFileName({
+        kind: descriptor.kind,
+        fileName: descriptor.fileName,
+        filePath,
+        sourceMessageId: descriptor.sourceMessageId,
+        collisionIndex
+      });
+      const localPath = path.join(scope.scopeDir, fileName);
+
+      try {
+        await fs.stat(localPath);
+      } catch (error) {
+        if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+          return { fileName, localPath };
+        }
+        throw error;
+      }
+    }
+
+    throw new Error("Could not allocate a unique attachment cache filename.");
   }
 
   async stageAttachment(descriptor) {
@@ -255,15 +291,11 @@ export class ChatSession {
       throw new Error("Telegram did not return a downloadable file path.");
     }
 
-    const fileName = buildAttachmentFileName({
-      kind: descriptor.kind,
-      fileName: descriptor.fileName,
-      filePath: file.file_path,
-      sourceMessageId: descriptor.sourceMessageId
-    });
-    const localPath = path.join(this.chatCacheDir(), fileName);
+    const { fileName, localPath } = await this.resolveAttachmentLocalPath(
+      descriptor,
+      file.file_path
+    );
 
-    await ensureDir(path.dirname(localPath));
     const buffer = await this.botApi.downloadFile(file.file_path, {
       maxBytes: ATTACHMENT_SIZE_LIMIT_BYTES
     });

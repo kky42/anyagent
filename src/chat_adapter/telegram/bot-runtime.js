@@ -13,7 +13,7 @@ export const TELEGRAM_COMMANDS = [
   { command: "auto", description: "Set agent automation level for this chat" },
   { command: "model", description: "Set model for future runs" },
   { command: "reasoning", description: "Set reasoning effort for future runs" },
-  { command: "clear_cache", description: "Clear cached attachments for this bot" },
+  { command: "clear_cache", description: "Clear cached attachments for this chat" },
   { command: "abort", description: "Abort current run and clear queued messages" },
   { command: "new", description: "Start a fresh session and clear context" },
   { command: "reset", description: "Reload config defaults for this chat" }
@@ -141,7 +141,7 @@ export class BotRuntime {
       return;
     }
 
-    await session.sendText(`Cleared cache for @${this.botConfig.username}.`);
+    await session.sendText("Cleared cache for this chat.");
   }
 
   async handleMessage(message) {

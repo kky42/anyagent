@@ -42,21 +42,6 @@ export function normalizeTelegramUsername(username) {
   return String(username || "").trim().replace(/^@+/, "").toLowerCase();
 }
 
-export function buildChatCacheDirName(chatId) {
-  const normalized = Number(chatId);
-  if (Number.isSafeInteger(normalized) && normalized >= 0) {
-    return `c${normalized.toString(36)}`;
-  }
-
-  const fallback = String(chatId ?? "")
-    .trim()
-    .replace(/[^A-Za-z0-9_-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-
-  return `c${fallback || "unknown"}`;
-}
-
 export function expandWorkdirPath(rawPath, { homeDir = os.homedir() } = {}) {
   const normalized = String(rawPath ?? "").trim();
   if (normalized === "~") {

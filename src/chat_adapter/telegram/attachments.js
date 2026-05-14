@@ -24,6 +24,7 @@ const DEFAULT_ATTACHMENT_EXTENSIONS = {
   voice: ".ogg",
   animation: ".mp4"
 };
+const MAX_ATTACHMENT_FILE_NAME_LENGTH = 160;
 
 export function attachmentSupportText() {
   return SUPPORTED_ATTACHMENT_KINDS.join(", ");
@@ -114,38 +115,72 @@ function sanitizeSegment(value, fallback = "attachment") {
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
 
-  return sanitized || fallback;
+  return sanitized && sanitized !== "." && sanitized !== ".." ? sanitized : fallback;
 }
 
 function sanitizeExtension(value) {
   const extension = String(value ?? "")
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9.]+/g, "");
+    .replace(/[^a-z0-9]+/g, "");
 
-  if (!extension.startsWith(".") || extension === ".") {
+  if (!extension || extension.length > 16) {
     return "";
   }
 
-  return extension;
+  return `.${extension}`;
+}
+
+function basenameFromAnyPath(value) {
+  return path.posix.basename(String(value ?? "").replace(/\\/g, "/"));
+}
+
+function extensionFromName(value) {
+  return sanitizeExtension(path.extname(basenameFromAnyPath(value)).replace(/^\./, ""));
+}
+
+function stemFromName(value, fallback) {
+  const baseName = basenameFromAnyPath(value);
+  const extension = path.extname(baseName);
+  const stem = extension ? baseName.slice(0, -extension.length) : baseName;
+  return sanitizeSegment(stem, fallback);
+}
+
+function truncateStemForFileName(stem, marker, collisionSuffix, extension) {
+  const maxStemLength = Math.max(
+    1,
+    MAX_ATTACHMENT_FILE_NAME_LENGTH - marker.length - collisionSuffix.length - extension.length
+  );
+  if (stem.length <= maxStemLength) {
+    return stem;
+  }
+
+  return stem.slice(0, maxStemLength).replace(/[._-]+$/g, "") || stem.slice(0, maxStemLength);
 }
 
 export function buildAttachmentFileName({
   kind,
   fileName,
   filePath,
-  sourceMessageId
+  sourceMessageId,
+  collisionIndex = 1
 }) {
-  const candidateName =
-    (typeof fileName === "string" && fileName.trim()) ||
-    (typeof filePath === "string" && path.basename(filePath)) ||
-    "";
-  const candidateExtension = sanitizeExtension(path.extname(candidateName || filePath || ""));
+  const fallbackStem = sanitizeSegment(kind, "attachment");
+  const originalName = typeof fileName === "string" && fileName.trim() ? fileName : "";
+  const stem = originalName ? stemFromName(originalName, fallbackStem) : fallbackStem;
+  const candidateExtension = extensionFromName(originalName || filePath);
   const defaultExtension = DEFAULT_ATTACHMENT_EXTENSIONS[kind] ?? "";
   const extension = candidateExtension || defaultExtension;
-  const fallbackId = sourceMessageId ?? Date.now();
+  const messageId = sanitizeSegment(sourceMessageId, "unknown");
+  const marker = `--m${messageId}`;
+  const normalizedCollisionIndex = Number(collisionIndex);
+  const collisionSuffix =
+    Number.isSafeInteger(normalizedCollisionIndex) && normalizedCollisionIndex > 1
+      ? `-${normalizedCollisionIndex}`
+      : "";
+  const cappedStem = truncateStemForFileName(stem, marker, collisionSuffix, extension);
 
-  return `msg${sanitizeSegment(fallbackId, kind)}${extension}`;
+  return `${cappedStem}${marker}${collisionSuffix}${extension}`;
 }
 
 export function summarizeTurn(turn) {

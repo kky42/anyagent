@@ -102,7 +102,7 @@ Useful PM2 commands:
 - `/reasoning` shows the current reasoning value.
 - `/reasoning <value>` sets reasoning effort for future runs in the current chat. Use `/reasoning default` to return to CLI defaults.
 - `/reset` reloads the current agent config from disk, clears chat-specific overrides, and starts a fresh session for this chat.
-- `/clear_cache` deletes cached Telegram attachments for the current Telegram bot instance.
+- `/clear_cache` deletes cached Telegram attachments for the current chat.
 - `/abort` interrupts the active agent run and clears the queued messages while keeping the current `sessionId`.
 - `/new` interrupts the active agent run, clears queued messages, and drops the current chat's stored `sessionId`.
 
@@ -112,7 +112,7 @@ Useful PM2 commands:
 - Startup discards pending Telegram updates so messages and slash commands sent while the relay was stopped are not processed after restart.
 - Each `(Telegram bot, chat)` pair has its own in-memory queue, `sessionId`, and usage state.
 - Supported Telegram attachments are `photo`, `document`, `video`, `audio`, `voice`, and `animation`.
-- Supported attachments are downloaded to `~/.anyagent/cache/telegram/<bot-username>/c<base36-chat-id>/...` and passed to every agent by local file path in the prompt.
+- Supported attachments are downloaded to `~/.anyagent/cache/<scope-hash>/...` and passed to every agent by local file path in the prompt. The scope hash is derived from the agent, platform, Telegram bot username, and chat id.
 - Attachment paths are rendered as `<attachments>` XML blocks with one `<attachment path="..." kind="..." />` entry per downloaded file, including photos.
 - Telegram media albums are grouped by `media_group_id` and submitted as one logical agent turn.
 - Attachments larger than 20 MB are rejected.
@@ -128,7 +128,7 @@ Useful PM2 commands:
 - Non-message items such as `reasoning`, `web_search`, and `command_execution` reuse one in-flight Telegram message that is edited as progress changes.
 - Telegram converts agent Markdown replies to Telegram-safe HTML, sends with `HTML` parse mode first, then falls back to `MarkdownV2` or plain text if parsing still fails.
 - Slash commands that change settings only affect the invoking chat session.
-- `/clear_cache` is bot-wide. It clears only `~/.anyagent/cache/telegram/<bot-username>/` and refuses to run while turns or media albums are pending.
+- `/clear_cache` clears only the current chat's scoped attachment cache and refuses to run while turns or media albums are pending.
 - `/cli <codex|pi|claude>` only affects the invoking chat, aborts its current run, clears that chat's queue, and resets that chat to a fresh agent session.
 - `/workdir <path>` only affects the invoking chat, aborts its current run, clears that chat's queue, and resets that chat to a fresh agent session.
 - `/abort` affects only the interactive run and queue for the current chat.
