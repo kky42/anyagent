@@ -9,6 +9,8 @@ import {
   DEFAULT_REASONING_EFFORT
 } from "../../runtime-settings.js";
 
+const CLAUDE_WEB_TOOL_ARGS = ["--allowedTools", "WebFetch,WebSearch"];
+
 /**
  * @typedef {object} ClaudeRunRequest
  * @property {string | null | undefined} [sessionId]
@@ -49,6 +51,7 @@ export function buildClaudeArgs({
     "-p",
     "--output-format",
     "stream-json",
+    ...CLAUDE_WEB_TOOL_ARGS,
     ...modeArgs,
     ...modelArgs,
     ...reasoningArgs,
