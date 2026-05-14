@@ -1,52 +1,65 @@
 # AnyAgent
 
-Run CLI coding agents from chat platforms.
+[English](./README.md) | [简体中文](./README.zh-CN.md)
 
-The current implementation ships CLI adapters for `codex`, `claude`, and `pi`, plus one chat
-adapter (`telegram`). The internal layout is ready for additional CLI agents such as Pi
-and additional chat platforms such as Mattermost.
+Run Codex, Claude, or Pi from Telegram.
 
-![codex in telegram example](./assets/example.png)
+AnyAgent in Telegram
 
-## Start
+![AnyAgent in Telegram](./assets/example.png)
 
-Run it directly without installing the package globally:
+## Why AnyAgent
+
+- Keep using the CLI agent you already set up locally, in Telegram private chats, with the same config and no migration.
+- See live streaming events, so the agent's current state stays visible while it works.
+- Use a full set of slash commands for a chat flow that feels close to the local CLI.
+- Add only a 7-line attachment contract to the prompt, keeping the relay non-invasive and close to native agent behavior.
+
+## Quick Start
+
+Install AnyAgent globally:
 
 ```bash
-npx anyagent
+npm install -g anyagent
 ```
 
-Foreground mode keeps the relay attached to the current terminal. If you close the terminal, log out, reboot the computer, or the process crashes, the relay stops.
-
-Create a new agent config:
+Create a Telegram bot with [BotFather](https://t.me/BotFather), then create an AnyAgent profile:
 
 ```bash
-npx anyagent add main codex
+anyagent add main codex
 ```
 
-This creates `~/.anyagent/agents/main/config.json` with a canonical config template. Edit the Telegram bot username, token, allowed usernames, and workdir as needed before running the relay.
+Edit the generated config:
 
-If you used the previous `codex-telegram-relay` package, the CLI and local
-runtime directory have intentionally changed. Move any local config you want to
-keep into `~/.anyagent/agents/<agent-id>/config.json`.
+```bash
+~/.anyagent/agents/main/config.json
+```
 
-## Adapter Layout
+Set your Telegram bot username, bot token, allowed Telegram username, and local workdir.
 
-- CLI adapters live in `src/cli_adapter/<agent>/`.
-- Chat adapters live in `src/chat_adapter/<platform>/`.
-- Current adapters: `src/cli_adapter/codex/`, `src/cli_adapter/claude/`, `src/cli_adapter/pi/`, and `src/chat_adapter/telegram/`.
+Start the relay:
 
-## Config
+```bash
+anyagent
+```
 
-Default config path: `~/.anyagent/agents`
+Open your bot in Telegram and send:
 
-Each agent lives in its own directory:
+```text
+/status
+```
+
+## Configuration
+
+Each profile lives under `~/.anyagent/agents/<profile-name>/`.
+
+A minimal config looks like this:
 
 ```json
 {
   "profile": {
     "cli": "codex",
-    "workdir": "/Users/you",
+    "workdir": "/Users/you/projects",
     "auto": "medium",
     "model": "default",
     "reasoningEffort": "default"
@@ -65,81 +78,87 @@ Each agent lives in its own directory:
 }
 ```
 
-Notes:
+Important fields:
 
-- `profile.cli` can be `codex`, `claude`, or `pi`.
-- `profile.workdir` is required. It must be an existing absolute path or `~/...`; the relay does not start if it is missing or invalid.
-- `profile.auto` defaults to `medium`.
-- `profile.model` and `profile.reasoningEffort` default to `default`, which means the relay does not pass a CLI-specific override.
-- `bindings.telegram.allowedUsernames` and bot usernames accept values with or without `@` and are normalized to lowercase.
-- If you do not know your Telegram username, send the bot any message once. The unauthorized reply shows the normalized username to add.
-- A single agent directory can bind to multiple Telegram bots, and the same agent profile can be reused by multiple chat platforms later.
+| Field | Meaning |
+| --- | --- |
+| `profile.cli` | Local agent CLI to run: `codex`, `claude`, or `pi`. |
+| `profile.workdir` | Local workspace used by the agent. Must be an existing absolute path or `~/...`. |
+| `profile.auto` | Permission level for agent actions: `low`, `medium`, or `high`. |
+| `profile.model` | Optional model override. Use `default` to keep the CLI default. |
+| `profile.reasoningEffort` | Optional reasoning override. Use `default` to keep the CLI default. |
+| `allowedUsernames` | Telegram usernames allowed to use this bot. |
+| `bots[].token` | Telegram bot token from BotFather. |
 
-## Persistent Deployment
+If you do not know your Telegram username, send the bot any message once. The unauthorized reply shows the normalized username to add.
 
-The relay does not daemonize itself and does not restart itself after crashes or reboots. For always-on usage, run it under a process manager.
+## Telegram Commands
 
-### PM2 Example
+| Command | Purpose |
+| --- | --- |
+| `/status` | Show current state, CLI, workdir, settings, context length, and queued messages. |
+| `/cli` | Show or change the current CLI. |
+| `/workdir` | Show or change the current workspace. |
+| `/auto` | Show or change the permission level. |
+| `/model` | Show or change the model override. |
+| `/reasoning` | Show or change reasoning effort. |
+| `/abort` | Stop the active run and clear queued messages. |
+| `/new` | Start a fresh agent session for this chat. |
+| `/reset` | Reload config from disk and clear chat-specific overrides. |
+| `/clear_cache` | Delete cached attachments for this chat. |
 
-Use PM2 when you want the relay to keep running in the background and restart automatically after crashes:
+Examples:
+
+```text
+/cli claude
+/workdir ~/projects/my-app
+/auto high
+/model default
+/reasoning high
+```
+
+## Persistent Deployment With PM2
+
+For always-on usage, install AnyAgent globally and run it with PM2:
 
 ```bash
-npm install -g pm2 anyagent
+npm install -g anyagent pm2
 pm2 start anyagent --name anyagent
 pm2 save
 ```
 
 Useful PM2 commands:
 
-- `pm2 status`
-- `pm2 logs anyagent`
-- `pm2 restart anyagent`
-- `pm2 stop anyagent`
+```bash
+pm2 status
+pm2 logs anyagent
+pm2 restart anyagent
+pm2 stop anyagent
+```
 
-## Telegram Commands
+To update AnyAgent and restart the relay:
 
-- `/status` shows running state, current CLI, current workdir, auto/model/reasoning values, the latest context length, and the queued messages for the current chat.
-- `/cli` shows the current chat CLI.
-- `/cli <codex|pi|claude>` changes the current chat CLI.
-- `/workdir` shows the current chat workdir.
-- `/workdir <path>` changes the current chat workdir. Only absolute paths and `~/...` are accepted.
-- `/auto` shows the current auto level.
-- `/auto <low|medium|high>` sets the auto level for future runs in the current chat.
-- `/model` shows the current model value.
-- `/model <value>` sets the model for future runs in the current chat. Use `/model default` to return to CLI defaults.
-- `/reasoning` shows the current reasoning value.
-- `/reasoning <value>` sets reasoning effort for future runs in the current chat. Use `/reasoning default` to return to CLI defaults.
-- `/reset` reloads the current agent config from disk, clears chat-specific overrides, and starts a fresh session for this chat.
-- `/clear_cache` deletes cached Telegram attachments for the current chat.
-- `/abort` interrupts the active agent run and clears the queued messages while keeping the current `sessionId`.
-- `/new` interrupts the active agent run, clears queued messages, and drops the current chat's stored `sessionId`.
+```bash
+npm install -g anyagent@latest
+pm2 restart anyagent
+pm2 save
+```
 
-## Behavior
+## Notes And Limits
 
-- Only private chats are supported.
-- Startup discards pending Telegram updates so messages and slash commands sent while the relay was stopped are not processed after restart.
-- Each `(Telegram bot, chat)` pair has its own in-memory queue, `sessionId`, and usage state.
-- Telegram thread/topic identifiers are not part of the agent session key. Multiple threads in the same private chat share one agent context and queue, while each turn's queued notice, progress, final response, errors, and generated attachments are sent back to the thread or direct-message topic that produced that turn.
-- Typing indicators are best-effort in Telegram private chat threads. The relay sends `sendChatAction` with the topic target, and Telegram clients can show the bot as typing in the root private chat, but Telegram Desktop and iOS currently do not render that typing state inside the thread window itself. Streaming/progress messages are the reliable live feedback path for threaded private chats.
-- Telegram replies are routed by topic fields only. The relay does not send `reply_parameters`, so bot responses do not visually quote the user's input message.
-- Supported Telegram attachments are `photo`, `document`, `video`, `audio`, `voice`, and `animation`.
-- Supported attachments are downloaded to `~/.anyagent/cache/<scope-hash>/...` and passed to every agent by local file path in the prompt. The scope hash is derived from the agent, platform, Telegram bot username, and chat id.
-- Attachment paths are rendered as `<attachments>` XML blocks with one `<attachment path="..." kind="..." />` entry per downloaded file, including photos.
-- Telegram media albums are grouped by `media_group_id` and submitted as one logical agent turn.
+- Only Telegram private chats are supported.
+- Messages sent while the relay is stopped are discarded on startup.
+- Supported attachments: photos, documents, videos, audio, voice messages, and animations.
 - Attachments larger than 20 MB are rejected.
-- Codex fresh prompts use `codex exec --json --skip-git-repo-check`; continued prompts use `codex exec resume`.
-- Claude fresh prompts use `claude -p --output-format stream-json`; continued prompts use `claude -p --output-format stream-json --resume <session-id>`.
-- Pi fresh prompts use `pi -p --mode json`; continued prompts use `pi -p --mode json --session <session-id>`.
-- The relay maps `auto` to each CLI's permission model. Codex uses `read-only`, `workspace-write`, or dangerous bypass. Claude uses `dontAsk`, `acceptEdits`, or `--dangerously-skip-permissions`.
-- Pi uses `--sandbox read-only`, `--sandbox workspace-write`, or `--sandbox danger-full-access` when the installed Pi extensions expose the `--sandbox` flag, such as `@kky42/pi-sandbox`. If the flag is not available, the relay starts Pi without sandbox arguments.
-- Fresh interactive sessions inject only a relay attachment contract using `<attachments>` XML blocks; Telegram-specific formatting is handled by the relay. Claude receives this contract through `--append-system-prompt`.
-- The relay keeps `sessionId` and the latest `context_length` in memory for the chat while the process is running.
-- Codex `context_length` is derived from the final `token_count.last_token_usage` event in the Codex rollout file under `~/.codex/sessions/...`. Claude `context_length` is derived from the streamed result usage. Pi `context_length` is derived from the final assistant `usage.totalTokens` value in the JSON event stream or saved session file under `~/.pi/agent/sessions/...`.
-- Completed Codex `agent_message` items, Claude text response events, and Pi assistant `message_end` events become the visible final reply. Pi text deltas are not forwarded one by one.
-- Non-message items such as `reasoning`, `web_search`, and `command_execution` reuse one in-flight Telegram message that is edited as progress changes.
-- Telegram converts agent Markdown replies to Telegram-safe HTML, sends with `HTML` parse mode first, then falls back to `MarkdownV2` or plain text if parsing still fails.
-- Slash commands that change settings only affect the invoking chat session.
-- `/clear_cache` clears only the current chat's scoped attachment cache and refuses to run while turns or media albums are pending.
-- `/cli <codex|pi|claude>` only affects the invoking chat, aborts its current run, clears that chat's queue, and resets that chat to a fresh agent session.
-- `/workdir <path>` only affects the invoking chat, aborts its current run, clears that chat's queue, and resets that chat to a fresh agent session.
-- `/abort` affects only the interactive run and queue for the current chat.
+- Chat-specific command changes only affect that Telegram chat.
+- Local config and runtime files live under `~/.anyagent/`.
+
+## Migration From codex-telegram-relay
+
+The package and local runtime directory changed.
+
+Move any config you want to keep into:
+
+```bash
+~/.anyagent/agents/<profile-name>/config.json
+```
