@@ -18,6 +18,14 @@ npx anyagent
 
 Foreground mode keeps the relay attached to the current terminal. If you close the terminal, log out, reboot the computer, or the process crashes, the relay stops.
 
+Create a new agent config:
+
+```bash
+npx anyagent add main codex
+```
+
+This creates `~/.anyagent/agents/main/config.json` with a canonical config template. Edit the Telegram bot username, token, allowed usernames, and workdir as needed before running the relay.
+
 If you used the previous `codex-telegram-relay` package, the CLI and local
 runtime directory have intentionally changed. Move any local config you want to
 keep into `~/.anyagent/agents/<agent-id>/config.json`.
@@ -38,10 +46,10 @@ Each agent lives in its own directory:
 {
   "profile": {
     "cli": "codex",
-    "workdir": "/Users/you/project",
+    "workdir": "/Users/you",
     "auto": "medium",
-    "model": "gpt-5.4",
-    "reasoningEffort": "xhigh"
+    "model": "default",
+    "reasoningEffort": "default"
   },
   "bindings": {
     "telegram": {
@@ -60,7 +68,7 @@ Each agent lives in its own directory:
 Notes:
 
 - `profile.cli` can be `codex`, `claude`, or `pi`.
-- `profile.workdir` is optional. If omitted, the relay uses your home directory. It must already exist.
+- `profile.workdir` is required. It must be an existing absolute path or `~/...`; the relay does not start if it is missing or invalid.
 - `profile.auto` defaults to `medium`.
 - `profile.model` and `profile.reasoningEffort` default to `default`, which means the relay does not pass a CLI-specific override.
 - `bindings.telegram.allowedUsernames` and bot usernames accept values with or without `@` and are normalized to lowercase.

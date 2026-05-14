@@ -1,5 +1,4 @@
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 
 import { normalizeBotAuto } from "./auto-mode.js";
@@ -10,6 +9,8 @@ import {
 } from "./runtime-settings.js";
 import {
   DEFAULT_CONFIG_PATH,
+  expandWorkdirPath,
+  normalizeAgentId,
   normalizeTelegramUsername
 } from "./utils.js";
 
@@ -31,17 +32,6 @@ function assertArrayOfStrings(value, fieldPath) {
       throw new Error(`${fieldPath} must contain only strings`);
     }
   }
-}
-
-function assertIdentifier(value, fieldPath) {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new Error(`${fieldPath} must be a non-empty string`);
-  }
-  const normalized = value.trim();
-  if (!/^[A-Za-z0-9_-]+$/.test(normalized)) {
-    throw new Error(`${fieldPath} must contain only letters, numbers, "_" or "-"`);
-  }
-  return normalized;
 }
 
 function normalizeAllowedUsernames(value, fieldPath) {
@@ -106,7 +96,7 @@ async function findAgentConfigFiles(configPath) {
   if (stats.isFile()) {
     return [
       {
-        agentId: assertIdentifier(path.basename(path.dirname(resolvedPath)), "agent id"),
+        agentId: normalizeAgentId(path.basename(path.dirname(resolvedPath)), "agent id"),
         filePath: resolvedPath
       }
     ];
@@ -123,7 +113,7 @@ async function findAgentConfigFiles(configPath) {
       continue;
     }
 
-    const agentId = assertIdentifier(entry.name, `agents/${entry.name}`);
+    const agentId = normalizeAgentId(entry.name, `agents/${entry.name}`);
     const filePath = path.join(resolvedPath, entry.name, "config.json");
     if (!(await pathExists(filePath))) {
       throw new Error(`Agent directory ${path.join(resolvedPath, entry.name)} must contain config.json`);
@@ -140,7 +130,7 @@ async function findAgentConfigFiles(configPath) {
   if (await pathExists(directConfigPath)) {
     return [
       {
-        agentId: assertIdentifier(path.basename(resolvedPath), "agent id"),
+        agentId: normalizeAgentId(path.basename(resolvedPath), "agent id"),
         filePath: directConfigPath
       }
     ];
@@ -163,7 +153,17 @@ function normalizeAgentProfile(rawConfig, agentId, filePath) {
     throw new Error(`${filePath}.profile.cli must be one of: ${SUPPORTED_AGENT_CLIS.join(", ")}`);
   }
 
-  const workdir = path.resolve(profile.workdir ?? os.homedir());
+  if (typeof profile.workdir !== "string" || !profile.workdir.trim()) {
+    throw new Error(`${filePath}.profile.workdir must be a non-empty string`);
+  }
+
+  let workdir;
+  try {
+    workdir = expandWorkdirPath(profile.workdir);
+  } catch {
+    throw new Error(`${filePath}.profile.workdir must be an absolute path or ~/...`);
+  }
+
   return {
     id: agentId,
     cli,
@@ -185,7 +185,7 @@ async function normalizeAgentConfig({ agentId, filePath }) {
       throw new Error();
     }
   } catch {
-    throw new Error(`${filePath}.profile.workdir must point to an existing path`);
+    throw new Error(`${filePath}.profile.workdir must point to an existing directory`);
   }
 
   const bindings = rawConfig.bindings ?? {};

@@ -140,6 +140,28 @@ test("loadConfig defaults profile values", async () => {
   assert.deepEqual(config.telegramBots[0].allowedUsernames, []);
 });
 
+test("loadConfig rejects missing workdir values", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-config-"));
+
+  await writeAgentConfig(tempDir, "primary", {
+    profile: {
+      cli: "codex"
+    },
+    bindings: {
+      telegram: {
+        bots: [
+          {
+            username: "RelayBot",
+            token: "token-1"
+          }
+        ]
+      }
+    }
+  });
+
+  await assert.rejects(() => loadConfig(tempDir), /profile\.workdir must be a non-empty string/);
+});
+
 test("loadConfig rejects missing workdir paths", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-config-"));
 
@@ -160,7 +182,7 @@ test("loadConfig rejects missing workdir paths", async () => {
     }
   });
 
-  await assert.rejects(() => loadConfig(tempDir), /profile.workdir must point to an existing path/);
+  await assert.rejects(() => loadConfig(tempDir), /profile.workdir must point to an existing directory/);
 });
 
 test("loadConfig rejects unsupported agent cli values", async () => {

@@ -38,6 +38,17 @@ export async function writeJsonFileAtomic(filePath, value) {
   await fs.rename(tempPath, filePath);
 }
 
+export function normalizeAgentId(value, fieldPath = "agent id") {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`${fieldPath} must be a non-empty string`);
+  }
+  const normalized = value.trim();
+  if (!/^[A-Za-z0-9_-]+$/.test(normalized)) {
+    throw new Error(`${fieldPath} must contain only letters, numbers, "_" or "-"`);
+  }
+  return normalized;
+}
+
 export function normalizeTelegramUsername(username) {
   return String(username || "").trim().replace(/^@+/, "").toLowerCase();
 }
