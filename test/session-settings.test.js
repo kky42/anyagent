@@ -75,6 +75,64 @@ test("/workdir aborts the active run, clears the queue, and uses the new workdir
   assert.equal(runnerFactory.runs.at(-1).params.sessionId, null);
 });
 
+test("/cli without args returns the current CLI", async () => {
+  const { session, fakeBotApi } = await createSession();
+
+  await session.handleCli("");
+
+  assert.equal(fakeBotApi.messages.at(-1).text, "Current CLI: codex.");
+});
+
+test("/cli rejects unsupported CLI names", async () => {
+  const { session, fakeBotApi } = await createSession();
+
+  await session.handleCli("vim");
+
+  assert.equal(fakeBotApi.messages.at(-1).text, "Unknown CLI. Use /cli codex|pi|claude.");
+  assert.equal(session.cliAdapter.id, "codex");
+});
+
+test("/cli is a no-op when the normalized CLI matches the current CLI", async () => {
+  const { session, fakeBotApi, configStore } = await createSession();
+  await session.updateSessionId("session-old");
+
+  await session.handleCli("Codex");
+
+  assert.equal(session.sessionId, "session-old");
+  assert.equal(session.cliAdapter.id, "codex");
+  assert.equal(configStore.patches.length, 0);
+  assert.equal(fakeBotApi.messages.at(-1).text, "CLI is already set to codex.");
+});
+
+test("/cli aborts the active run, clears the queue, and uses the new CLI on the next run", async () => {
+  const { session, runnerFactory, fakeBotApi, configStore } = await createSession();
+  await session.updateSessionId("session-old");
+  await session.updateContextLength(1200);
+
+  await session.enqueueMessage("first");
+  await session.enqueueMessage("second");
+  assert.equal(session.queue.length, 1);
+
+  await session.handleCli("pi");
+
+  assert.equal(runnerFactory.runs[0].aborted, true);
+  assert.equal(session.queue.length, 0);
+  assert.equal(session.sessionId, null);
+  assert.equal(session.contextLength, null);
+  assert.equal(session.cliAdapter.id, "pi");
+  assert.equal(session.cli, "pi");
+  assert.equal(session.botConfig.agent.cli, "codex");
+  assert.equal(configStore.patches.length, 0);
+  assert.equal(
+    fakeBotApi.messages.at(-1).text,
+    "CLI set to pi. Started a new session. The next message will open a fresh Pi session."
+  );
+
+  await session.enqueueMessage("after switch");
+  assert.equal(runnerFactory.runs.at(-1).params.cli, "pi");
+  assert.equal(runnerFactory.runs.at(-1).params.sessionId, null);
+});
+
 test("status shows the latest context length", async () => {
   const { session } = await createSession();
   session.contextLength = 18321;
@@ -161,7 +219,7 @@ test("/reset reloads config defaults, clears chat overrides, and starts a new se
     allowedUsernames: ["alloweduser"],
     agent: {
       id: "primary-agent",
-      cli: "codex",
+      cli: "claude",
       workdir: nextWorkdir,
       auto: "high",
       model: "gpt-5.4-mini",
@@ -172,6 +230,8 @@ test("/reset reloads config defaults, clears chat overrides, and starts a new se
   await session.handleReset();
 
   assert.equal(session.botConfig.agent.workdir, nextWorkdir);
+  assert.equal(session.botConfig.agent.cli, "claude");
+  assert.equal(session.cliAdapter.id, "claude");
   assert.equal(session.workdir, nextWorkdir);
   assert.equal(session.auto, "high");
   assert.equal(session.model, "gpt-5.4-mini");
@@ -181,7 +241,7 @@ test("/reset reloads config defaults, clears chat overrides, and starts a new se
   assert.equal(configStore.loads.length, 1);
   assert.equal(
     fakeBotApi.messages.at(-1).text,
-    `Reset current chat to config defaults. Started a new session with workdir ${nextWorkdir}, auto high, model gpt-5.4-mini, reasoning effort high.`
+    `Reset current chat to config defaults. Started a new session with CLI claude, workdir ${nextWorkdir}, auto high, model gpt-5.4-mini, reasoning effort high.`
   );
 });
 

@@ -8,7 +8,7 @@ import {
   buildAttachmentFileName
 } from "./attachments.js";
 import { formatAuto, parseAutoArgument } from "../../auto-mode.js";
-import { cliAdapterFor } from "../../cli_adapter/index.js";
+import { SUPPORTED_AGENT_CLIS, cliAdapterFor } from "../../cli_adapter/index.js";
 import { buildTurnInputMessage } from "../../cli_adapter/turn-input.js";
 import { ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS } from "../output-instructions.js";
 import { renderStatusMessage } from "./render.js";
@@ -29,6 +29,8 @@ import { unsupportedAttachmentMessage } from "./attachments.js";
 import { MessageRenderer } from "./message-renderer.js";
 import { NOOP_CONFIG_STORE, SessionPersistence } from "./session-persistence.js";
 import { prepareForSessionReset, resetSession } from "./session-reset.js";
+
+const CLI_COMMAND_CHOICES = ["codex", "pi", "claude"];
 
 function normalizeCaption(value) {
   return String(value ?? "").trim();
@@ -88,6 +90,14 @@ export class ChatSession {
 
   set contextLength(contextLength) {
     this.persistence.contextLength = contextLength;
+  }
+
+  get cli() {
+    return this.persistence.cli;
+  }
+
+  set cli(cli) {
+    this.persistence.cli = cli;
   }
 
   get workdir() {
@@ -387,10 +397,43 @@ export class ChatSession {
     );
   }
 
+  async handleCli(args) {
+    const normalizedCli = normalizeSettingArgument(args)?.toLowerCase();
+    if (!normalizedCli) {
+      await this.sendText(`Current CLI: ${this.cliAdapter.id}.`);
+      return;
+    }
+
+    if (!SUPPORTED_AGENT_CLIS.includes(normalizedCli)) {
+      await this.sendText(`Unknown CLI. Use /cli ${CLI_COMMAND_CHOICES.join("|")}.`);
+      return;
+    }
+
+    if (normalizedCli === this.cliAdapter.id) {
+      await this.sendText(`CLI is already set to ${normalizedCli}.`);
+      return;
+    }
+
+    await prepareForSessionReset(this);
+    this.cli = normalizedCli;
+    this.cliAdapter = cliAdapterFor(normalizedCli);
+    if (this.usesDefaultRunFactory) {
+      this.createAgentRun = (params) => this.cliAdapter.startRun(params);
+    }
+    if (this.usesDefaultContextLengthResolver) {
+      this.resolveContextLength = this.cliAdapter.resolveContextLength;
+    }
+    await this.clearPersistedState();
+
+    await this.sendText(
+      `CLI set to ${normalizedCli}. Started a new session. The next message will open a fresh ${this.cliAdapter.displayName} session.`
+    );
+  }
+
   statusText() {
     return renderStatusMessage({
       isRunning: this.isRunning,
-      cli: this.cliAdapter.id,
+      cli: this.cli,
       workdir: this.workdir,
       auto: this.auto,
       model: this.model,
@@ -541,7 +584,7 @@ export class ChatSession {
     await this.resetChatToBotDefaults();
 
     await this.sendText(
-      `Reset current chat to config defaults. Started a new session with workdir ${this.workdir}, auto ${formatAuto(this.auto)}, model ${this.model}, reasoning effort ${this.reasoningEffort}.`
+      `Reset current chat to config defaults. Started a new session with CLI ${this.cli}, workdir ${this.workdir}, auto ${formatAuto(this.auto)}, model ${this.model}, reasoning effort ${this.reasoningEffort}.`
     );
   }
 
@@ -585,6 +628,8 @@ export class ChatSession {
     let emittedError = false;
     let currentSessionId = this.sessionId;
     let completedTurn = false;
+    const runCli = this.cli;
+    const runCliAdapter = this.cliAdapter;
     const message = buildTurnInputMessage(nextTurn);
     const buildArgParams = {
       sessionId: this.sessionId,
@@ -595,16 +640,17 @@ export class ChatSession {
       developerInstructions: ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS
     };
     const runParams = {
+      cli: runCli,
       workdir: this.workdir,
       ...buildArgParams
     };
-    const debugArgs = this.cliAdapter.buildArgs(buildArgParams);
+    const debugArgs = runCliAdapter.buildArgs(buildArgParams);
     const redactedArgs = debugArgs.slice();
     if (redactedArgs.length > 0) {
       redactedArgs[redactedArgs.length - 1] = `<prompt:${message.length}>`;
     }
     this.logger(
-      `starting ${this.cliAdapter.id} run ${JSON.stringify({
+      `starting ${runCliAdapter.id} run ${JSON.stringify({
         sessionId: this.sessionId,
         attachments: nextTurn.attachments.map((attachment) => ({
           kind: attachment.kind,
@@ -617,7 +663,7 @@ export class ChatSession {
     const run = this.createAgentRun({
       ...runParams,
       onEvent: async (event) => {
-        const actions = this.cliAdapter.eventToActions(event);
+        const actions = runCliAdapter.eventToActions(event);
         for (const action of actions) {
           if (action.kind === "session_started" && action.sessionId) {
             currentSessionId = action.sessionId;
@@ -649,7 +695,7 @@ export class ChatSession {
       onStdErr: (chunk) => {
         const message = chunk.trim();
         if (message) {
-          this.logger(`${this.cliAdapter.id} stderr: ${message}`);
+          this.logger(`${runCliAdapter.id} stderr: ${message}`);
         }
       }
     });
@@ -671,10 +717,10 @@ export class ChatSession {
         await this.clearProgressMessage();
       }
       if (!result.sawTerminalEvent && !emittedError) {
-        await this.renderErrorText(`${this.cliAdapter.displayName} exited without a terminal JSON event.`);
+        await this.renderErrorText(`${runCliAdapter.displayName} exited without a terminal JSON event.`);
       }
     } catch (error) {
-      await this.renderErrorText(`${this.cliAdapter.displayName} process error: ${toErrorMessage(error)}`);
+      await this.renderErrorText(`${runCliAdapter.displayName} process error: ${toErrorMessage(error)}`);
     } finally {
       this.activeRun = null;
       this.isRunning = false;

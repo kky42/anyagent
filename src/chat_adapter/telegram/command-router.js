@@ -34,6 +34,9 @@ export async function routeTextMessage({ text, botUsername, session, runtime }) 
     case "workdir":
       await session.handleWorkdir(parsedCommand.args);
       return;
+    case "cli":
+      await session.handleCli(parsedCommand.args);
+      return;
     case "model":
       await session.handleModel(parsedCommand.args);
       return;

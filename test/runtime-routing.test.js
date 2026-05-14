@@ -117,17 +117,23 @@ test("runtime clears only the current bot cache", async () => {
   assert.equal(fakeBotApi.messages.at(-1).text, "Cleared cache for @relaybot.");
 });
 
-test("runtime routes /auto, /model, and /reasoning to the current chat session", async () => {
+test("runtime routes /cli, /auto, /model, and /reasoning to the current chat session", async () => {
   const { runtime, fakeBotApi } = await createRuntime();
 
+  await runtime.handleMessage(buildTextMessage("/cli pi"));
   await runtime.handleMessage(buildTextMessage("/auto low"));
   await runtime.handleMessage(buildTextMessage("/model gpt-5.4"));
   await runtime.handleMessage(buildTextMessage("/reasoning high"));
 
   const session = runtime.sessionFor(1001);
+  assert.equal(session.cliAdapter.id, "pi");
   assert.equal(session.auto, "low");
   assert.equal(session.model, "gpt-5.4");
   assert.equal(session.reasoningEffort, "high");
+  assert.equal(
+    fakeBotApi.messages.at(-4).text,
+    "CLI set to pi. Started a new session. The next message will open a fresh Pi session."
+  );
   assert.equal(fakeBotApi.messages.at(-3).text, "Auto level set to low.");
   assert.equal(fakeBotApi.messages.at(-2).text, "Model set to gpt-5.4.");
   assert.equal(fakeBotApi.messages.at(-1).text, "Reasoning effort set to high.");
@@ -159,14 +165,28 @@ test("runtime keeps separate sessions for different private chats", async () => 
   });
 
   await runtime.handleMessage(buildTextMessage("/model gpt-5.5", "AllowedUser", 1001));
+  await runtime.handleMessage(buildTextMessage("/cli pi", "AllowedUser", 1001));
 
   const sessionA = runtime.sessionFor(1001);
   const sessionB = runtime.sessionFor(2002);
 
+  assert.equal(sessionA.cliAdapter.id, "pi");
+  assert.equal(sessionB.cliAdapter.id, "codex");
   assert.equal(sessionA.model, "gpt-5.5");
   assert.equal(sessionB.model, "deepseek-v4-flash");
   assert.equal(sessionA.workdir, "/tmp/project");
   assert.equal(sessionB.workdir, "/tmp/project");
+});
+
+test("runtime uses the current chat CLI for future runs", async () => {
+  const { runtime, runnerFactory } = await createRuntime();
+
+  await runtime.handleMessage(buildTextMessage("/cli pi"));
+  await runtime.handleMessage(buildTextMessage("hello"));
+
+  assert.equal(runnerFactory.runs.length, 1);
+  assert.equal(runnerFactory.runs[0].params.cli, "pi");
+  runnerFactory.runs[0].finish();
 });
 
 test("runtime creates Claude-backed chat sessions from agent profile", async () => {
@@ -237,7 +257,7 @@ test("runtime routes /reset to the current chat session only", async () => {
     allowedUsernames: ["alloweduser"],
     agent: {
       id: "primary-agent",
-      cli: "codex",
+      cli: "claude",
       workdir: nextWorkdir,
       auto: "medium",
       model: "default",
@@ -249,12 +269,13 @@ test("runtime routes /reset to the current chat session only", async () => {
   const session = runtime.sessionFor(1001);
   assert.equal(session.sessionId, null);
   assert.equal(session.contextLength, null);
+  assert.equal(session.cliAdapter.id, "claude");
   assert.equal(session.workdir, nextWorkdir);
   assert.equal(session.auto, "medium");
   assert.equal(session.model, "default");
   assert.equal(session.reasoningEffort, "high");
   assert.equal(
     fakeBotApi.messages.at(-1).text,
-    `Reset current chat to config defaults. Started a new session with workdir ${nextWorkdir}, auto medium, model default, reasoning effort high.`
+    `Reset current chat to config defaults. Started a new session with CLI claude, workdir ${nextWorkdir}, auto medium, model default, reasoning effort high.`
   );
 });

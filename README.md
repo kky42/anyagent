@@ -90,7 +90,9 @@ Useful PM2 commands:
 
 ## Telegram Commands
 
-- `/status` shows running state, current workdir, auto/model/reasoning values, the latest context length, and the queued messages for the current chat.
+- `/status` shows running state, current CLI, current workdir, auto/model/reasoning values, the latest context length, and the queued messages for the current chat.
+- `/cli` shows the current chat CLI.
+- `/cli <codex|pi|claude>` changes the current chat CLI.
 - `/workdir` shows the current chat workdir.
 - `/workdir <path>` changes the current chat workdir. Only absolute paths and `~/...` are accepted.
 - `/auto` shows the current auto level.
@@ -127,5 +129,6 @@ Useful PM2 commands:
 - Telegram converts agent Markdown replies to Telegram-safe HTML, sends with `HTML` parse mode first, then falls back to `MarkdownV2` or plain text if parsing still fails.
 - Slash commands that change settings only affect the invoking chat session.
 - `/clear_cache` is bot-wide. It clears only `~/.anyagent/cache/telegram/<bot-username>/` and refuses to run while turns or media albums are pending.
+- `/cli <codex|pi|claude>` only affects the invoking chat, aborts its current run, clears that chat's queue, and resets that chat to a fresh agent session.
 - `/workdir <path>` only affects the invoking chat, aborts its current run, clears that chat's queue, and resets that chat to a fresh agent session.
 - `/abort` affects only the interactive run and queue for the current chat.

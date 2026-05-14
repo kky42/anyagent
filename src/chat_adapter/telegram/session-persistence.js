@@ -24,6 +24,7 @@ function runtimeStateFromAgent(agent) {
   return {
     sessionId: null,
     contextLength: null,
+    cli: agent?.cli,
     workdir: agent?.workdir,
     auto: agent?.auto ?? AUTO_DEFAULT,
     model: agent?.model ?? DEFAULT_MODEL,
@@ -51,6 +52,14 @@ export class SessionPersistence {
 
   set contextLength(contextLength) {
     this.state.contextLength = contextLength;
+  }
+
+  get cli() {
+    return this.state.cli;
+  }
+
+  set cli(cli) {
+    this.state.cli = cli;
   }
 
   get workdir() {
