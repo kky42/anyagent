@@ -1,3 +1,7 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import process from "node:process";
+
 import { TelegramApiError } from "../../src/chat_adapter/telegram/telegram-api.js";
 
 export class FakeBotApi {
@@ -198,6 +202,44 @@ export function createControlledRunnerFactory() {
       };
       runs.push(run);
       return run;
+    }
+  };
+}
+
+function buildWindowsCmdShim(scriptPath) {
+  const scriptName = path.basename(scriptPath);
+  return [
+    "@echo off",
+    `node "%~dp0\\${scriptName}" %*`
+  ].join("\r\n");
+}
+
+async function createExecutableCommandFile(dir, commandName, sourceText) {
+  const isWindows = process.platform === "win32";
+  const fileName = isWindows ? `${commandName}.cmd` : commandName;
+  const filePath = path.join(dir, fileName);
+
+  if (isWindows) {
+    const scriptPath = path.join(dir, `${commandName}.test.mjs`);
+    await fs.writeFile(scriptPath, sourceText, "utf8");
+    await fs.writeFile(filePath, buildWindowsCmdShim(scriptPath), "utf8");
+    return filePath;
+  }
+
+  await fs.writeFile(filePath, `#!/usr/bin/env node\n${sourceText}`, "utf8");
+  await fs.chmod(filePath, 0o755);
+  return filePath;
+}
+
+export async function createFakeCliCommand(dir, commandName, sourceText) {
+  const commandPath = await createExecutableCommandFile(dir, commandName, sourceText);
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${dir}${path.delimiter}${originalPath ?? ""}`;
+
+  return {
+    commandPath,
+    restorePath() {
+      process.env.PATH = originalPath;
     }
   };
 }

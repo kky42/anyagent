@@ -1,13 +1,13 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import process from "node:process";
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import { buildClaudeArgs } from "../src/cli_adapter/claude/args.js";
 import { startClaudeRun } from "../src/cli_adapter/claude/runner.js";
 import { ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS } from "../src/chat_adapter/output-instructions.js";
+import { createFakeCliCommand } from "./support/fakes.js";
 
 test("buildClaudeArgs uses print stream-json for a fresh session", () => {
   assert.deepEqual(buildClaudeArgs({
@@ -107,19 +107,13 @@ test("buildClaudeArgs appends model, effort, and attachment contract prompt", ()
 test("startClaudeRun invokes claude from the requested workdir", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-claude-args-"));
   const workdir = path.join(tempDir, "workspace");
-  const fakeClaudePath = path.join(tempDir, "claude");
   await fs.mkdir(workdir);
-  await fs.writeFile(
-    fakeClaudePath,
-    `#!/usr/bin/env node
-process.stdout.write(JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd() }) + "\\n");
-`,
-    "utf8"
+  const fakeCommand = await createFakeCliCommand(
+    tempDir,
+    "claude",
+    `process.stdout.write(JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd() }) + "\\n");
+`
   );
-  await fs.chmod(fakeClaudePath, 0o755);
-
-  const originalPath = process.env.PATH;
-  process.env.PATH = `${tempDir}${path.delimiter}${originalPath ?? ""}`;
 
   try {
     const run = startClaudeRun({
@@ -149,7 +143,7 @@ process.stdout.write(JSON.stringify({ args: process.argv.slice(2), cwd: process.
       cwd: await fs.realpath(workdir)
     });
   } finally {
-    process.env.PATH = originalPath;
+    fakeCommand.restorePath();
     await fs.rm(tempDir, { recursive: true, force: true });
   }
 });

@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import process from "node:process";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -12,6 +11,7 @@ import {
   startPiRun
 } from "../src/cli_adapter/pi/runner.js";
 import { ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS } from "../src/chat_adapter/output-instructions.js";
+import { createFakeCliCommand } from "./support/fakes.js";
 
 test("buildPiArgs uses print json mode for a fresh session", () => {
   assert.deepEqual(buildPiArgs({
@@ -130,23 +130,18 @@ test("buildPiArgs appends model, thinking, and attachment contract", () => {
 test("startPiRun invokes pi from the requested workdir and detects sandbox support", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-pi-args-"));
   const workdir = path.join(tempDir, "workspace");
-  const fakePiPath = path.join(tempDir, "pi");
   await fs.mkdir(workdir);
-  await fs.writeFile(
-    fakePiPath,
-    `#!/usr/bin/env node
-if (process.argv.includes("-h")) {
+  const fakeCommand = await createFakeCliCommand(
+    tempDir,
+    "pi",
+    `if (process.argv.includes("-h")) {
   process.stdout.write("Options:\\n  --sandbox <value>\\n");
   process.exit(0);
 }
 process.stdout.write(JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd() }) + "\\n");
-`,
-    "utf8"
+`
   );
-  await fs.chmod(fakePiPath, 0o755);
 
-  const originalPath = process.env.PATH;
-  process.env.PATH = `${tempDir}${path.delimiter}${originalPath ?? ""}`;
   resetPiFeatureDetectionCache();
 
   try {
@@ -176,7 +171,7 @@ process.stdout.write(JSON.stringify({ args: process.argv.slice(2), cwd: process.
       cwd: await fs.realpath(workdir)
     });
   } finally {
-    process.env.PATH = originalPath;
+    fakeCommand.restorePath();
     resetPiFeatureDetectionCache();
     await fs.rm(tempDir, { recursive: true, force: true });
   }
@@ -184,24 +179,19 @@ process.stdout.write(JSON.stringify({ args: process.argv.slice(2), cwd: process.
 
 test("detectPiSandboxFlagSupport returns false when pi help does not expose the extension flag", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-pi-detect-"));
-  const fakePiPath = path.join(tempDir, "pi");
-  await fs.writeFile(
-    fakePiPath,
-    `#!/usr/bin/env node
-process.stdout.write("Options:\\n  --mode <mode>\\n");
-`,
-    "utf8"
+  const fakeCommand = await createFakeCliCommand(
+    tempDir,
+    "pi",
+    `process.stdout.write("Options:\\n  --mode <mode>\\n");
+`
   );
-  await fs.chmod(fakePiPath, 0o755);
 
-  const originalPath = process.env.PATH;
-  process.env.PATH = `${tempDir}${path.delimiter}${originalPath ?? ""}`;
   resetPiFeatureDetectionCache();
 
   try {
     assert.equal(detectPiSandboxFlagSupport(), false);
   } finally {
-    process.env.PATH = originalPath;
+    fakeCommand.restorePath();
     resetPiFeatureDetectionCache();
     await fs.rm(tempDir, { recursive: true, force: true });
   }
@@ -209,26 +199,21 @@ process.stdout.write("Options:\\n  --mode <mode>\\n");
 
 test("detectPiSandboxFlagSupport caches sandbox support per workdir", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-pi-detect-cwd-"));
-  const fakePiPath = path.join(tempDir, "pi");
   const workdirWithoutFlag = path.join(tempDir, "without-flag");
   const workdirWithFlag = path.join(tempDir, "with-flag");
   await fs.mkdir(workdirWithoutFlag);
   await fs.mkdir(workdirWithFlag);
-  await fs.writeFile(
-    fakePiPath,
-    `#!/usr/bin/env node
-if (process.cwd().endsWith("with-flag")) {
+  const fakeCommand = await createFakeCliCommand(
+    tempDir,
+    "pi",
+    `if (process.cwd().endsWith("with-flag")) {
   process.stdout.write("Options:\\n  --sandbox <value>\\n");
 } else {
   process.stdout.write("Options:\\n  --mode <mode>\\n");
 }
-`,
-    "utf8"
+`
   );
-  await fs.chmod(fakePiPath, 0o755);
 
-  const originalPath = process.env.PATH;
-  process.env.PATH = `${tempDir}${path.delimiter}${originalPath ?? ""}`;
   resetPiFeatureDetectionCache();
 
   try {
@@ -236,7 +221,7 @@ if (process.cwd().endsWith("with-flag")) {
     assert.equal(detectPiSandboxFlagSupport({ cwd: workdirWithFlag }), true);
     assert.equal(detectPiSandboxFlagSupport({ cwd: workdirWithoutFlag }), false);
   } finally {
-    process.env.PATH = originalPath;
+    fakeCommand.restorePath();
     resetPiFeatureDetectionCache();
     await fs.rm(tempDir, { recursive: true, force: true });
   }

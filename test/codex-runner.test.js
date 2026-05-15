@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { buildCodexArgs } from "../src/cli_adapter/codex/args.js";
 import { startCodexRun } from "../src/cli_adapter/codex/runner.js";
 import { ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS } from "../src/chat_adapter/output-instructions.js";
+import { createFakeCliCommand } from "./support/fakes.js";
 
 test("buildCodexArgs uses exec for a fresh session", () => {
   assert.deepEqual(buildCodexArgs({
@@ -139,19 +140,13 @@ test("buildCodexArgs injects developer_instructions only for fresh sessions", ()
 test("startCodexRun invokes codex from the requested workdir", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-args-"));
   const workdir = path.join(tempDir, "workspace");
-  const fakeCodexPath = path.join(tempDir, "codex");
   await fs.mkdir(workdir);
-  await fs.writeFile(
-    fakeCodexPath,
-    `#!/usr/bin/env node
-process.stdout.write(JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd() }) + "\\n");
-`,
-    "utf8"
+  const fakeCommand = await createFakeCliCommand(
+    tempDir,
+    "codex",
+    `process.stdout.write(JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd() }) + "\\n");
+`
   );
-  await fs.chmod(fakeCodexPath, 0o755);
-
-  const originalPath = process.env.PATH;
-  process.env.PATH = `${tempDir}${path.delimiter}${originalPath ?? ""}`;
 
   try {
     const run = startCodexRun({
@@ -179,27 +174,21 @@ process.stdout.write(JSON.stringify({ args: process.argv.slice(2), cwd: process.
       cwd: await fs.realpath(workdir)
     });
   } finally {
-    process.env.PATH = originalPath;
+    fakeCommand.restorePath();
     await fs.rm(tempDir, { recursive: true, force: true });
   }
 });
 
-test("startCodexRun forces SIGKILL when the child ignores SIGTERM", async () => {
+test("startCodexRun terminates a child that ignores SIGTERM", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-runner-"));
-  const fakeCodexPath = path.join(tempDir, "codex");
-  await fs.writeFile(
-    fakeCodexPath,
-    `#!/usr/bin/env node
-process.on("SIGTERM", () => {});
+  const fakeCommand = await createFakeCliCommand(
+    tempDir,
+    "codex",
+    `process.on("SIGTERM", () => {});
 process.stdout.write("ready\\n");
 setInterval(() => {}, 1000);
-`,
-    "utf8"
+`
   );
-  await fs.chmod(fakeCodexPath, 0o755);
-
-  const originalPath = process.env.PATH;
-  process.env.PATH = `${tempDir}${path.delimiter}${originalPath ?? ""}`;
 
   try {
     const run = startCodexRun({
@@ -215,9 +204,13 @@ setInterval(() => {}, 1000);
     const result = await run.done;
 
     assert.equal(result.aborted, true);
-    assert.equal(result.signal, "SIGKILL");
+    if (process.platform === "win32") {
+      assert.equal(result.signal, null);
+    } else {
+      assert.equal(result.signal, "SIGKILL");
+    }
   } finally {
-    process.env.PATH = originalPath;
+    fakeCommand.restorePath();
     await fs.rm(tempDir, { recursive: true, force: true });
   }
 });

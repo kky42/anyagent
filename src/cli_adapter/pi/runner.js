@@ -1,6 +1,4 @@
-import { spawnSync } from "node:child_process";
-
-import { startCliJsonRun } from "../process-runner.js";
+import { spawnCliSync, startCliJsonRun } from "../process-runner.js";
 import { buildPiArgs } from "./args.js";
 import { parseJsonlLine } from "./events.js";
 
@@ -16,7 +14,7 @@ export function detectPiSandboxFlagSupport({ cwd = process.cwd() } = {}) {
     return sandboxFlagSupportCache.get(cacheKey);
   }
 
-  const result = spawnSync("pi", ["-h"], {
+  const result = spawnCliSync("pi", ["-h"], {
     encoding: "utf8",
     cwd,
     env: process.env
