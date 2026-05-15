@@ -1,5 +1,8 @@
 # AnyAgent
 
+[![CI](https://github.com/kky42/anyagent/actions/workflows/ci.yml/badge.svg)](https://github.com/kky42/anyagent/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/%40kky42%2Fanyagent.svg)](https://www.npmjs.com/package/@kky42/anyagent)
+
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
 把 Codex、Claude 或 Pi 直接带到 Telegram 里用。
