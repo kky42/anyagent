@@ -16,6 +16,7 @@ test("buildClaudeArgs uses print stream-json for a fresh session", () => {
     "-p",
     "--output-format",
     "stream-json",
+    "--verbose",
     "--allowedTools",
     "WebFetch,WebSearch",
     "--permission-mode",
@@ -32,6 +33,7 @@ test("buildClaudeArgs resumes an existing session", () => {
     "-p",
     "--output-format",
     "stream-json",
+    "--verbose",
     "--allowedTools",
     "WebFetch,WebSearch",
     "--permission-mode",
@@ -50,6 +52,7 @@ test("buildClaudeArgs maps auto modes to Claude permission flags", () => {
     "-p",
     "--output-format",
     "stream-json",
+    "--verbose",
     "--allowedTools",
     "WebFetch,WebSearch",
     "--permission-mode",
@@ -64,6 +67,7 @@ test("buildClaudeArgs maps auto modes to Claude permission flags", () => {
     "-p",
     "--output-format",
     "stream-json",
+    "--verbose",
     "--allowedTools",
     "WebFetch,WebSearch",
     "--dangerously-skip-permissions",
@@ -74,7 +78,7 @@ test("buildClaudeArgs maps auto modes to Claude permission flags", () => {
 test("buildClaudeArgs allows Claude web tools for every auto mode", () => {
   for (const autoMode of ["low", "medium", "high"]) {
     assert.deepEqual(
-      buildClaudeArgs({ message: "hello", autoMode }).slice(3, 5),
+      buildClaudeArgs({ message: "hello", autoMode }).slice(4, 6),
       ["--allowedTools", "WebFetch,WebSearch"]
     );
   }
@@ -90,6 +94,7 @@ test("buildClaudeArgs appends model, effort, and attachment contract prompt", ()
     "-p",
     "--output-format",
     "stream-json",
+    "--verbose",
     "--allowedTools",
     "WebFetch,WebSearch",
     "--permission-mode",
@@ -142,6 +147,7 @@ process.stdout.write(JSON.stringify({
       "-p",
       "--output-format",
       "stream-json",
+      "--verbose",
       "--allowedTools",
       "WebFetch,WebSearch",
       "--permission-mode",

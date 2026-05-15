@@ -51,6 +51,7 @@ export function buildClaudeArgs({
     "-p",
     "--output-format",
     "stream-json",
+    "--verbose",
     ...CLAUDE_WEB_TOOL_ARGS,
     ...modeArgs,
     ...modelArgs,

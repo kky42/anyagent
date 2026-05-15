@@ -4,6 +4,7 @@ import path from "node:path";
 import process from "node:process";
 
 const WINDOWS_BATCH_EXTENSIONS = new Set([".bat", ".cmd"]);
+const WINDOWS_NODE_EXTENSIONS = new Set([".cjs", ".js", ".mjs"]);
 
 function getPathEnv(env) {
   return env.PATH ?? env.Path ?? env.path ?? "";
@@ -133,27 +134,14 @@ function prepareWindowsBatchSpawn(command, args) {
   };
 }
 
-function prepareWindowsCliSpawn(command, args, options) {
-  const resolvedCommand = resolveWindowsCommandPath(command, {
-    cwd: options.cwd,
-    env: options.env
-  });
+function prepareWindowsResolvedSpawn(resolvedCommand, args) {
   const extension = path.extname(resolvedCommand).toLowerCase();
 
   if (WINDOWS_BATCH_EXTENSIONS.has(extension)) {
-    const targetPath = findNpmShimTarget(resolvedCommand);
-    if (targetPath) {
-      return {
-        command: process.execPath,
-        args: [targetPath, ...args],
-        options: { windowsHide: true }
-      };
-    }
-
     return prepareWindowsBatchSpawn(resolvedCommand, args);
   }
 
-  if (extension === ".js") {
+  if (WINDOWS_NODE_EXTENSIONS.has(extension)) {
     return {
       command: process.execPath,
       args: [resolvedCommand, ...args],
@@ -166,6 +154,25 @@ function prepareWindowsCliSpawn(command, args, options) {
     args,
     options: { windowsHide: true }
   };
+}
+
+export function prepareWindowsCliSpawn(command, args, options = {}) {
+  const resolvedCommand = resolveWindowsCommandPath(command, {
+    cwd: options.cwd,
+    env: options.env
+  });
+  const extension = path.extname(resolvedCommand).toLowerCase();
+
+  if (WINDOWS_BATCH_EXTENSIONS.has(extension)) {
+    const targetPath = findNpmShimTarget(resolvedCommand);
+    if (targetPath) {
+      return prepareWindowsResolvedSpawn(targetPath, args);
+    }
+
+    return prepareWindowsBatchSpawn(resolvedCommand, args);
+  }
+
+  return prepareWindowsResolvedSpawn(resolvedCommand, args);
 }
 
 export function spawnCli(command, args, options = {}) {
