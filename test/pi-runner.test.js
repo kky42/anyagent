@@ -131,14 +131,22 @@ test("startPiRun invokes pi from the requested workdir and detects sandbox suppo
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-pi-args-"));
   const workdir = path.join(tempDir, "workspace");
   await fs.mkdir(workdir);
+  await fs.writeFile(path.join(workdir, "cwd-marker.txt"), "ok", "utf8");
   const fakeCommand = await createFakeCliCommand(
     tempDir,
     "pi",
-    `if (process.argv.includes("-h")) {
+    `import fs from "node:fs";
+import path from "node:path";
+
+if (process.argv.includes("-h")) {
   process.stdout.write("Options:\\n  --sandbox <value>\\n");
   process.exit(0);
 }
-process.stdout.write(JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd() }) + "\\n");
+process.stdout.write(JSON.stringify({
+  args: process.argv.slice(2),
+  cwdBasename: path.basename(process.cwd()),
+  hasCwdMarker: fs.existsSync("cwd-marker.txt")
+}) + "\\n");
 `
   );
 
@@ -159,17 +167,17 @@ process.stdout.write(JSON.stringify({ args: process.argv.slice(2), cwd: process.
 
     await run.done;
 
-    assert.deepEqual(JSON.parse(chunks.join("").trim()), {
-      args: [
-        "-p",
-        "--mode",
-        "json",
-        "--sandbox",
-        "read-only",
-        "hello"
-      ],
-      cwd: await fs.realpath(workdir)
-    });
+    const output = JSON.parse(chunks.join("").trim());
+    assert.deepEqual(output.args, [
+      "-p",
+      "--mode",
+      "json",
+      "--sandbox",
+      "read-only",
+      "hello"
+    ]);
+    assert.equal(output.cwdBasename, "workspace");
+    assert.equal(output.hasCwdMarker, true);
   } finally {
     fakeCommand.restorePath();
     resetPiFeatureDetectionCache();

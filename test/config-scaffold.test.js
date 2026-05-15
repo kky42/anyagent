@@ -11,6 +11,8 @@ import {
 import { main } from "../src/cli.js";
 
 test("buildCanonicalAgentConfig includes required profile defaults", () => {
+  const workdir = path.resolve("/Users/example");
+
   assert.deepEqual(
     buildCanonicalAgentConfig({
       cli: "codex",
@@ -19,7 +21,7 @@ test("buildCanonicalAgentConfig includes required profile defaults", () => {
     {
       profile: {
         cli: "codex",
-        workdir: "/Users/example",
+        workdir,
         auto: "medium",
         model: "default",
         reasoningEffort: "default"

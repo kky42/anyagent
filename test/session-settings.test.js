@@ -43,15 +43,18 @@ test("/workdir rejects invalid paths", async () => {
 });
 
 test("/workdir is a no-op when the normalized path matches the current workdir", async () => {
-  const { session, fakeBotApi, configStore } = await createSession();
+  const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-workdir-current-"));
+  const { session, fakeBotApi, configStore } = await createSession({
+    agent: { workdir }
+  });
   await session.updateSessionId("session-old");
 
-  await session.handleWorkdir("/tmp/project");
+  await session.handleWorkdir(workdir);
 
   assert.equal(session.sessionId, "session-old");
-  assert.equal(session.workdir, "/tmp/project");
+  assert.equal(session.workdir, workdir);
   assert.equal(configStore.patches.length, 0);
-  assert.equal(fakeBotApi.messages.at(-1).text, "Workdir is already set to /tmp/project.");
+  assert.equal(fakeBotApi.messages.at(-1).text, `Workdir is already set to ${workdir}.`);
 });
 
 test("/workdir aborts the active run, clears the queue, and uses the new workdir on the next run", async () => {

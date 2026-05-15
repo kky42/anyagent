@@ -108,10 +108,18 @@ test("startClaudeRun invokes claude from the requested workdir", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-claude-args-"));
   const workdir = path.join(tempDir, "workspace");
   await fs.mkdir(workdir);
+  await fs.writeFile(path.join(workdir, "cwd-marker.txt"), "ok", "utf8");
   const fakeCommand = await createFakeCliCommand(
     tempDir,
     "claude",
-    `process.stdout.write(JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd() }) + "\\n");
+    `import fs from "node:fs";
+import path from "node:path";
+
+process.stdout.write(JSON.stringify({
+  args: process.argv.slice(2),
+  cwdBasename: path.basename(process.cwd()),
+  hasCwdMarker: fs.existsSync("cwd-marker.txt")
+}) + "\\n");
 `
   );
 
@@ -129,19 +137,19 @@ test("startClaudeRun invokes claude from the requested workdir", async () => {
 
     await run.done;
 
-    assert.deepEqual(JSON.parse(chunks.join("").trim()), {
-      args: [
-        "-p",
-        "--output-format",
-        "stream-json",
-        "--allowedTools",
-        "WebFetch,WebSearch",
-        "--permission-mode",
-        "acceptEdits",
-        "hello"
-      ],
-      cwd: await fs.realpath(workdir)
-    });
+    const output = JSON.parse(chunks.join("").trim());
+    assert.deepEqual(output.args, [
+      "-p",
+      "--output-format",
+      "stream-json",
+      "--allowedTools",
+      "WebFetch,WebSearch",
+      "--permission-mode",
+      "acceptEdits",
+      "hello"
+    ]);
+    assert.equal(output.cwdBasename, "workspace");
+    assert.equal(output.hasCwdMarker, true);
   } finally {
     fakeCommand.restorePath();
     await fs.rm(tempDir, { recursive: true, force: true });
