@@ -12,10 +12,10 @@ export class MediaGroupBuffer {
     return this.pendingMediaGroups.size > 0;
   }
 
-  queue(session, message) {
+  queue(session, message, handleMessages = (messages) => session.handleAttachmentMessages(messages)) {
     const mediaGroupId = message?.media_group_id;
     if (!mediaGroupId) {
-      return session.handleAttachmentMessages([message]);
+      return typeof handleMessages === "function" ? handleMessages([message]) : undefined;
     }
 
     const key = mediaGroupKey(session.chatId, mediaGroupId);
@@ -26,8 +26,12 @@ export class MediaGroupBuffer {
 
     const entry = existing ?? {
       session,
-      messages: []
+      messages: [],
+      handleMessages: null
     };
+    if (typeof handleMessages === "function") {
+      entry.handleMessages = handleMessages;
+    }
     entry.messages.push(message);
     entry.timer = setTimeout(() => {
       void this.flush(key);
@@ -45,7 +49,9 @@ export class MediaGroupBuffer {
 
     clearTimeout(entry.timer);
     this.pendingMediaGroups.delete(key);
-    await entry.session.handleAttachmentMessages(entry.messages);
+    if (typeof entry.handleMessages === "function") {
+      await entry.handleMessages(entry.messages);
+    }
   }
 
   clear() {

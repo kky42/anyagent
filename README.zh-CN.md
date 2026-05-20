@@ -56,7 +56,7 @@ anyagent
 
 每个 profile 都位于 `~/.anyagent/agents/<profile-name>/`。
 
-最小配置示例：
+较完整的配置示例：
 
 ```json
 {
@@ -70,6 +70,10 @@ anyagent
   "bindings": {
     "telegram": {
       "allowedUsernames": ["your-telegram-username"],
+      "groupHistory": {
+        "hours": 24,
+        "messages": 1000
+      },
       "bots": [
         {
           "username": "your_bot_username",
@@ -91,9 +95,21 @@ anyagent
 | `profile.model` | 可选的模型覆盖配置。使用 `default` 表示沿用 CLI 默认值。 |
 | `profile.reasoningEffort` | 可选的 reasoning 覆盖配置。使用 `default` 表示沿用 CLI 默认值。 |
 | `allowedUsernames` | 允许使用这个 bot 的 Telegram username。 |
+| `groupHistory.hours` | 群聊上下文的小时窗口。默认 `24`。 |
+| `groupHistory.messages` | 群聊上下文的已观察消息数量窗口。默认 `1000`。 |
 | `bots[].token` | BotFather 提供的 Telegram bot token。 |
 
+`groupHistory` 整个配置块是可选的。如果省略，AnyAgent 会使用上面列出的默认值。
+
 如果你不知道自己的 Telegram username，先给 bot 发送任意消息。未授权回复里会显示需要加入配置的标准化 username。
+
+## Telegram 群聊
+
+在群聊里，AnyAgent 只会在消息明确提到 bot 时运行，例如 `@your_bot_username summarize this`。
+
+触发后，agent 会收到已观察到的群聊上下文和当前触发消息。上下文受 `groupHistory.hours`、`groupHistory.messages` 和上一次触发边界限制，所以已经发给 agent 的消息不会在下一次触发时重复发送。历史上下文里的附件只显示元信息。relay 只会下载触发消息和它回复的消息里的附件。
+
+Telegram Bot API 不能读取任意历史群聊消息。daemon 重启后，AnyAgent 的已观察群聊历史会从空开始。如果 bot 开启了 Telegram Privacy Mode，Telegram 可能只投递命令、提及 bot 的消息和对 bot 的回复；如果需要更完整的观察上下文，需要关闭 Privacy Mode 或把 bot 设为管理员。
 
 ## Telegram 命令
 

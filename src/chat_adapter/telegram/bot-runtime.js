@@ -1,7 +1,14 @@
 import { DEFAULT_CACHE_PATH, normalizeTelegramUsername, sleep, toErrorMessage } from "../../utils.js";
 import { ALBUM_QUIET_PERIOD_MS, hasSupportedAttachment, unsupportedAttachmentMessage } from "./attachments.js";
 import { ChatSession, replyTargetFromTelegramMessage } from "./chat-session.js";
-import { routeTextMessage } from "./command-router.js";
+import { parseCommand, routeTextMessage } from "./command-router.js";
+import {
+  buildGroupPrompt,
+  DEFAULT_GROUP_HISTORY_HOURS,
+  DEFAULT_GROUP_HISTORY_MESSAGES,
+  GroupHistory,
+  isBotAddressed
+} from "./group-history.js";
 import { MediaGroupBuffer } from "./media-group-buffer.js";
 import { NOOP_CONFIG_STORE } from "./session-persistence.js";
 import { TelegramApiError, TelegramBotApi } from "./telegram-api.js";
@@ -18,6 +25,8 @@ export const TELEGRAM_COMMANDS = [
   { command: "new", description: "Start a fresh session and clear context" },
   { command: "reset", description: "Reload config defaults for this chat" }
 ];
+
+const ROUTED_GROUP_COMMANDS = new Set(TELEGRAM_COMMANDS.map((command) => command.command));
 
 function unauthorizedMessage(user) {
   const username = normalizeTelegramUsername(user?.username);
@@ -39,6 +48,57 @@ const IGNORED_SERVICE_MESSAGE_FIELDS = [
 
 function isIgnoredServiceMessage(message) {
   return IGNORED_SERVICE_MESSAGE_FIELDS.some((field) => message?.[field]);
+}
+
+function messageText(message) {
+  if (typeof message?.text === "string") {
+    return message.text;
+  }
+  if (typeof message?.caption === "string") {
+    return message.caption;
+  }
+  return "";
+}
+
+function messageId(message) {
+  const id = Number(message?.message_id);
+  return Number.isFinite(id) ? id : null;
+}
+
+function latestMessageById(messages) {
+  let latest = null;
+  let latestId = null;
+
+  for (const message of messages) {
+    const id = messageId(message);
+    if (latest === null || (id !== null && (latestId === null || id > latestId))) {
+      latest = message;
+      latestId = id;
+    }
+  }
+
+  return latest;
+}
+
+function groupLikeConversationId(message) {
+  const chatType = message?.chat?.type;
+  if (chatType === "group" || chatType === "supergroup") {
+    return String(message.chat.id);
+  }
+
+  if (chatType === "private") {
+    const title = typeof message?.chat?.title === "string" ? message.chat.title.trim() : "";
+    if (title) {
+      const topicId =
+        message?.direct_messages_topic?.topic_id ??
+        message?.message_thread_id;
+      return topicId === null || topicId === undefined
+        ? String(message.chat.id)
+        : `${message.chat.id}:topic:${topicId}`;
+    }
+  }
+
+  return null;
 }
 
 export class BotRuntime {
@@ -64,6 +124,7 @@ export class BotRuntime {
     this.pollPromise = null;
     this.pollAbortController = null;
     this.sessions = new Map();
+    this.groupHistories = new Map();
     this.mediaGroupBuffer = new MediaGroupBuffer({ quietPeriodMs: albumQuietPeriodMs });
   }
 
@@ -71,22 +132,38 @@ export class BotRuntime {
     process.stderr.write(`[telegram:@${this.botConfig.username}] ${message}\n`);
   }
 
-  sessionFor(chatId) {
-    const key = String(chatId);
+  sessionFor(chatId, options = {}) {
+    const conversationId = options.conversationId ?? chatId;
+    const key = String(conversationId);
     let session = this.sessions.get(key);
     if (!session) {
       session = new ChatSession({
         botConfig: this.botConfig,
         botApi: this.botApi,
         configStore: this.configStore,
-        logger: (message) => this.log(`${chatId}: ${message}`),
+        logger: (message) => this.log(`${key}: ${message}`),
         chatId,
+        conversationId,
         cacheRootDir: this.cacheRootDir,
         createAgentRun: this.createAgentRun
       });
       this.sessions.set(key, session);
     }
     return session;
+  }
+
+  groupHistoryFor(conversationId) {
+    const key = String(conversationId);
+    let history = this.groupHistories.get(key);
+    if (!history) {
+      const groupHistory = this.botConfig.groupHistory ?? {};
+      history = new GroupHistory({
+        maxHours: groupHistory.hours ?? DEFAULT_GROUP_HISTORY_HOURS,
+        maxMessages: groupHistory.messages ?? DEFAULT_GROUP_HISTORY_MESSAGES
+      });
+      this.groupHistories.set(key, history);
+    }
+    return history;
   }
 
   hasPendingBotWork() {
@@ -140,8 +217,11 @@ export class BotRuntime {
     await session.sendText(text);
   }
 
-  async handleClearCache(chatId, options = {}) {
-    const session = this.sessionFor(chatId);
+  async handleClearCache(sessionOrChatId, options = {}) {
+    const session =
+      sessionOrChatId instanceof ChatSession
+        ? sessionOrChatId
+        : this.sessionFor(sessionOrChatId);
     if (this.hasPendingBotWork()) {
       await session.sendText(
         "Cannot clear cache while runs, queued turns, or media albums are pending.",
@@ -166,11 +246,20 @@ export class BotRuntime {
       return;
     }
 
-    if (message.chat?.type !== "private") {
-      await this.sendDirectMessage(chatId, "This bot only supports private chats.");
+    const groupConversationId = groupLikeConversationId(message);
+    if (groupConversationId !== null) {
+      await this.handleGroupMessage(message, { conversationId: groupConversationId });
       return;
     }
 
+    if (message.chat?.type === "private") {
+      await this.handlePrivateMessage(message);
+      return;
+    }
+  }
+
+  async handlePrivateMessage(message) {
+    const chatId = message.chat?.id;
     if (!this.isAuthorized(message.from)) {
       await this.sendDirectMessage(chatId, unauthorizedMessage(message.from));
       return;
@@ -200,6 +289,96 @@ export class BotRuntime {
     }
 
     await session.sendText(unsupportedAttachmentMessage(), { replyTarget });
+  }
+
+  async handleGroupMessage(message, { conversationId = message.chat?.id } = {}) {
+    const chatId = message.chat?.id;
+    if (isIgnoredServiceMessage(message)) {
+      return;
+    }
+
+    const session = this.sessionFor(chatId, { conversationId });
+    const history = this.groupHistoryFor(conversationId);
+    const addressed = isBotAddressed(message, this.botUsername ?? this.botConfig.username);
+    history.remember(message);
+
+    if (!this.isAuthorized(message.from)) {
+      if (hasSupportedAttachment(message)) {
+        await this.mediaGroupBuffer.queue(session, message, null);
+      }
+      return;
+    }
+
+    if (!addressed && hasSupportedAttachment(message)) {
+      await this.mediaGroupBuffer.queue(session, message, null);
+      return;
+    }
+
+    if (!addressed) {
+      return;
+    }
+
+    const text = messageText(message);
+    const parsedCommand = parseCommand(text, this.botUsername ?? this.botConfig.username);
+    if (ROUTED_GROUP_COMMANDS.has(parsedCommand?.command)) {
+      await routeTextMessage({
+        text,
+        botUsername: this.botUsername ?? this.botConfig.username,
+        session,
+        runtime: this,
+        replyTarget: replyTargetFromTelegramMessage(message)
+      });
+      return;
+    }
+
+    if (hasSupportedAttachment(message)) {
+      await this.mediaGroupBuffer.queue(session, message, (messages) =>
+        this.handleGroupTriggerMessages({ session, history, messages, triggerMessage: message })
+      );
+      return;
+    }
+
+    await this.handleGroupTriggerMessages({
+      session,
+      history,
+      triggerMessage: message,
+      messages: [message]
+    });
+  }
+
+  async handleGroupTriggerMessages({ session, history, messages, triggerMessage = null }) {
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return;
+    }
+
+    const primaryMessage = triggerMessage ?? messages[0];
+    const referenceMessage = primaryMessage.reply_to_message ?? null;
+    const attachmentMessages = [
+      ...messages,
+      ...(referenceMessage ? [referenceMessage] : [])
+    ];
+
+    try {
+      const contextMessages = history.contextBefore(primaryMessage);
+      const promptText = buildGroupPrompt({
+        contextMessages,
+        triggerMessage: primaryMessage,
+        attachmentMessages: messages,
+        referenceMessage
+      });
+      const attachments = await session.stageAttachmentsFromMessages(attachmentMessages);
+
+      history.markTriggered(latestMessageById(messages) ?? primaryMessage);
+      await session.enqueueTurn({
+        promptText,
+        attachments,
+        replyTarget: replyTargetFromTelegramMessage(primaryMessage)
+      });
+    } catch (error) {
+      await session.sendText(toErrorMessage(error), {
+        replyTarget: replyTargetFromTelegramMessage(primaryMessage)
+      });
+    }
   }
 
   async handleUpdate(update) {

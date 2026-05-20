@@ -44,7 +44,7 @@ export async function routeTextMessage({ text, botUsername, session, runtime, re
       await session.handleReasoningEffort(parsedCommand.args, { replyTarget });
       return;
     case "clear_cache":
-      await runtime.handleClearCache(session.chatId, { replyTarget });
+      await runtime.handleClearCache(session, { replyTarget });
       return;
     case "abort":
       await session.handleAbort({ replyTarget });

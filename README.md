@@ -56,7 +56,7 @@ Open your bot in Telegram and send:
 
 Each profile lives under `~/.anyagent/agents/<profile-name>/`.
 
-A minimal config looks like this:
+A fuller config example looks like this:
 
 ```json
 {
@@ -70,6 +70,10 @@ A minimal config looks like this:
   "bindings": {
     "telegram": {
       "allowedUsernames": ["your-telegram-username"],
+      "groupHistory": {
+        "hours": 24,
+        "messages": 1000
+      },
       "bots": [
         {
           "username": "your_bot_username",
@@ -91,9 +95,21 @@ Important fields:
 | `profile.model` | Optional model override. Use `default` to keep the CLI default. |
 | `profile.reasoningEffort` | Optional reasoning override. Use `default` to keep the CLI default. |
 | `allowedUsernames` | Telegram usernames allowed to use this bot. |
+| `groupHistory.hours` | Group-chat context window in hours. Defaults to `24`. |
+| `groupHistory.messages` | Group-chat context window in observed messages. Defaults to `1000`. |
 | `bots[].token` | Telegram bot token from BotFather. |
 
+The `groupHistory` block is optional. If it is omitted, AnyAgent uses the defaults shown above.
+
 If you do not know your Telegram username, send the bot any message once. The unauthorized reply shows the normalized username to add.
+
+## Telegram Group Chats
+
+In group chats, AnyAgent only runs when a message explicitly mentions the bot, for example `@your_bot_username summarize this`.
+
+When triggered, the agent receives observed group context plus the triggering message. Context is limited by `groupHistory.hours`, `groupHistory.messages`, and the previous trigger boundary, so messages already sent to the agent are not resent on the next trigger. Attachments from historical context are shown as metadata only. The relay downloads attachments only from the triggering message and the message it replies to.
+
+Telegram bots cannot fetch arbitrary past group history through the Bot API. After a daemon restart, AnyAgent starts with an empty observed group history. If the bot runs with Telegram Privacy Mode enabled, Telegram may only deliver commands, mentions, and replies to the bot; disable Privacy Mode or make the bot an admin if you need broader observed context.
 
 ## Telegram Commands
 

@@ -51,11 +51,41 @@ test("loadConfig loads agent profiles and telegram bindings", async () => {
   assert.equal(config.telegramBots.length, 1);
   assert.equal(config.telegramBots[0].username, "relaybot");
   assert.deepEqual(config.telegramBots[0].allowedUsernames, ["owneruser", "alloweduser"]);
+  assert.deepEqual(config.telegramBots[0].groupHistory, { hours: 24, messages: 1000 });
   assert.equal(config.telegramBots[0].agent.id, "primary");
   assert.equal(config.telegramBots[0].agent.workdir, workdir);
 
   const botConfig = findTelegramBotConfig(config, { agentId: "primary", username: "@RelayBot" });
   assert.equal(botConfig?.username, "relaybot");
+});
+
+test("loadConfig accepts telegram group history settings", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-config-"));
+  const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-workdir-"));
+
+  await writeAgentConfig(tempDir, "primary", {
+    profile: {
+      cli: "codex",
+      workdir
+    },
+    bindings: {
+      telegram: {
+        groupHistory: {
+          hours: 6,
+          messages: 50
+        },
+        bots: [
+          {
+            username: "RelayBot",
+            token: "token-1"
+          }
+        ]
+      }
+    }
+  });
+
+  const config = await loadConfig(tempDir);
+  assert.deepEqual(config.telegramBots[0].groupHistory, { hours: 6, messages: 50 });
 });
 
 test("loadConfig accepts Claude agent profiles", async () => {

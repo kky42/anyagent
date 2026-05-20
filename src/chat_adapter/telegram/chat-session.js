@@ -80,6 +80,7 @@ export class ChatSession {
     configStore = NOOP_CONFIG_STORE,
     logger,
     chatId,
+    conversationId = chatId,
     cacheRootDir = DEFAULT_CACHE_PATH,
     createAgentRun = null,
     createCodexRun = null,
@@ -92,6 +93,7 @@ export class ChatSession {
     this.configStore = configStore;
     this.logger = logger;
     this.chatId = chatId;
+    this.conversationId = conversationId;
     this.cacheRootDir = cacheRootDir;
     this.queue = [];
     this.isRunning = false;
@@ -248,7 +250,7 @@ export class ChatSession {
       agentId: this.botConfig.agent?.id,
       platform: "telegram",
       bindingId: this.botConfig.username,
-      conversationId: this.chatId
+      conversationId: this.conversationId
     });
   }
 
@@ -374,6 +376,29 @@ export class ChatSession {
       promptText,
       attachments
     };
+  }
+
+  async stageAttachmentsFromMessages(messages) {
+    const attachments = [];
+    const downloadedPaths = [];
+
+    try {
+      for (const message of messages) {
+        const descriptor = attachmentDescriptorFromMessage(message);
+        if (!descriptor) {
+          continue;
+        }
+
+        const attachment = await this.stageAttachment(descriptor);
+        attachments.push(attachment);
+        downloadedPaths.push(attachment.localPath);
+      }
+    } catch (error) {
+      await Promise.allSettled(downloadedPaths.map((filePath) => fs.rm(filePath, { force: true })));
+      throw error;
+    }
+
+    return attachments;
   }
 
   async handleAttachmentMessages(messages) {
