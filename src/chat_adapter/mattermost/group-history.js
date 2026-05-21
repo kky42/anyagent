@@ -1,4 +1,4 @@
-import { truncateText } from "../../utils.js";
+import { formatLocalTimestamp, truncateText } from "../../utils.js";
 import {
   DEFAULT_GROUP_HISTORY_HOURS,
   DEFAULT_GROUP_HISTORY_MESSAGES
@@ -42,7 +42,7 @@ function userLabel(post) {
 }
 
 function formatTime(timestampSeconds) {
-  return new Date(timestampSeconds * 1000).toISOString().replace("T", " ").replace(/\.\d{3}Z$/, " UTC");
+  return formatLocalTimestamp(timestampSeconds);
 }
 
 function attachmentMetaFromPost(post) {

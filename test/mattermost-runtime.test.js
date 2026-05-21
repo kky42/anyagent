@@ -302,6 +302,8 @@ test("Mattermost group channels only trigger on mentions and keep channel sessio
   assert.deepEqual([...runtime.sessions.keys()], ["channel1"]);
   assert.equal(runnerFactory.runs.length, 1);
   assert.match(runnerFactory.runs[0].params.message, /Context:/);
+  assert.match(runnerFactory.runs[0].params.message, /\[1970-\d\d-\d\d \d\d:\d\d:\d\d\] \[user @alice\]: unaddressed/);
+  assert.doesNotMatch(runnerFactory.runs[0].params.message, /UTC|Z\b|[+-]\d\d:\d\d/);
   assert.match(runnerFactory.runs[0].params.message, /unaddressed/);
   assert.match(runnerFactory.runs[0].params.message, /@relaybot please answer/);
   await runnerFactory.runs[0].emit({

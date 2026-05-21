@@ -54,6 +54,7 @@ HTTP_PROXY=http://127.0.0.1:7890 HTTPS_PROXY=http://127.0.0.1:7890 npm start
   - `medium` => `codex exec --sandbox workspace-write`
   - `high` => `codex exec --dangerously-bypass-approvals-and-sandbox`
 - `/abort` only affects the interactive run and queued interactive messages for the current chat.
+- Any time shown to users or agents must use the local timezone. Format these timestamps as `YYYY-MM-DD HH:mm:ss` with no timezone suffix, for example `2026-05-21 15:30:45`.
 
 ## Codex Instruction Injection
 

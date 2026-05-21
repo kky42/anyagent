@@ -411,6 +411,8 @@ test("runtime stores group messages and only addressed messages trigger agent ru
 
   assert.equal(runnerFactory.runs.length, 1);
   assert.match(runnerFactory.runs[0].params.message, /^Context:\n/);
+  assert.match(runnerFactory.runs[0].params.message, /\[2023-\d\d-\d\d \d\d:\d\d:\d\d\] \[user @alloweduser\]: background one/);
+  assert.doesNotMatch(runnerFactory.runs[0].params.message, /UTC|Z\b|[+-]\d\d:\d\d/);
   assert.match(runnerFactory.runs[0].params.message, /\[user @alloweduser\]: background one/);
   assert.match(runnerFactory.runs[0].params.message, /\[user @alloweduser\]: background two/);
   assert.match(runnerFactory.runs[0].params.message, /Message to you:\n.*@relaybot summarize/);

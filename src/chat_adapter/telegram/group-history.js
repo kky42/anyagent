@@ -3,7 +3,7 @@ import {
   DEFAULT_GROUP_HISTORY_HOURS,
   DEFAULT_GROUP_HISTORY_MESSAGES
 } from "../common/group-history-defaults.js";
-import { normalizeTelegramUsername, truncateText } from "../../utils.js";
+import { formatLocalTimestamp, normalizeTelegramUsername, truncateText } from "../../utils.js";
 import { parseCommand } from "./command-router.js";
 
 export { DEFAULT_GROUP_HISTORY_HOURS, DEFAULT_GROUP_HISTORY_MESSAGES };
@@ -126,8 +126,7 @@ function userLabel(user) {
 }
 
 function formatTime(timestampSeconds) {
-  const timestampMs = timestampSeconds * 1000;
-  return new Date(timestampMs).toISOString().replace("T", " ").replace(/\.\d{3}Z$/, " UTC");
+  return formatLocalTimestamp(timestampSeconds);
 }
 
 function attachmentMetaFromMessage(message) {

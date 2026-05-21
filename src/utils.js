@@ -101,6 +101,14 @@ export function formatTokenCountK(value) {
   return `${(total / 1000).toFixed(1)}k`;
 }
 
+export function formatLocalTimestamp(timestampSeconds) {
+  const date = new Date(timestampSeconds * 1000);
+  const pad = (value) => String(value).padStart(2, "0");
+  const datePart = [date.getFullYear(), pad(date.getMonth() + 1), pad(date.getDate())].join("-");
+  const timePart = [pad(date.getHours()), pad(date.getMinutes()), pad(date.getSeconds())].join(":");
+  return `${datePart} ${timePart}`;
+}
+
 export function truncateText(text, maxLength = 120) {
   if (text.length <= maxLength) {
     return text;
