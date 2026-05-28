@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 
 import { BotRuntime } from "../src/chat_adapter/mattermost/bot-runtime.js";
 import { isBotAddressed } from "../src/chat_adapter/mattermost/group-history.js";
-import { flush } from "./support/async.js";
+import { flush, waitFor } from "./support/async.js";
 import { createControlledRunnerFactory, FakeConfigStore } from "./support/fakes.js";
 
 class FakeMattermostApi {
@@ -222,6 +222,191 @@ test("Mattermost runtime closes a websocket that connects after stop is requeste
 
   assert.equal(client.closeCalls, 1);
   assert.equal(runtime.websocket, null);
+});
+
+test("Mattermost runtime reconnects when an open websocket goes stale", async () => {
+  class ReconnectingMattermostApi extends FakeMattermostApi {
+    constructor() {
+      super();
+      this.clients = [];
+    }
+
+    async connectWebSocket(options = {}) {
+      const now = Date.now();
+      const client = {
+        socket: { readyState: 1 },
+        lastActivityAt: now,
+        lastMessageAt: now,
+        closeCalls: 0,
+        sendTyping() {
+          return true;
+        },
+        close() {
+          this.closeCalls += 1;
+          this.socket.readyState = 3;
+          options.onClose?.({ code: 1000, reason: "test close" });
+        }
+      };
+      this.clients.push(client);
+      options.onClient?.(client);
+      options.onOpen?.(client);
+      return client;
+    }
+  }
+
+  const botApi = new ReconnectingMattermostApi();
+  const { runtime } = await createRuntime({ botApi });
+  runtime.watchdogIntervalMs = 5;
+  runtime.staleWebSocketMs = 5;
+
+  await runtime.start();
+  await waitFor(() => botApi.clients.length === 1);
+  const firstClient = botApi.clients[0];
+  firstClient.lastActivityAt = Date.now() - 100;
+  firstClient.lastMessageAt = Date.now() - 100;
+
+  await waitFor(() => botApi.clients.length === 2, 20);
+  await runtime.stop();
+
+  assert.equal(firstClient.closeCalls, 1);
+  assert.equal(runtime.reconnectCount >= 2, true);
+  assert.equal(runtime.lastWsCloseAt > 0, true);
+});
+
+test("Mattermost runtime does not reconnect a socket with recent non-message activity", async () => {
+  class QuietHealthyMattermostApi extends FakeMattermostApi {
+    constructor() {
+      super();
+      this.clients = [];
+    }
+
+    async connectWebSocket(options = {}) {
+      const now = Date.now();
+      const client = {
+        socket: { readyState: 1 },
+        lastActivityAt: now,
+        lastMessageAt: now,
+        closeCalls: 0,
+        close() {
+          this.closeCalls += 1;
+          this.socket.readyState = 3;
+          options.onClose?.({ code: 1000, reason: "test close" });
+        },
+        sendTyping() {
+          return true;
+        }
+      };
+      this.clients.push(client);
+      options.onClient?.(client);
+      options.onOpen?.(client);
+      return client;
+    }
+  }
+
+  const botApi = new QuietHealthyMattermostApi();
+  const { runtime } = await createRuntime({ botApi });
+  runtime.staleWebSocketMs = 5;
+
+  await runtime.connect();
+  const client = botApi.clients[0];
+  const now = Date.now();
+  client.lastActivityAt = now;
+  client.lastMessageAt = now - 100;
+
+  assert.equal(runtime.closeStaleWebSocket(now + 4), false);
+  assert.equal(client.closeCalls, 0);
+  assert.equal(runtime.websocket, client);
+});
+
+test("Mattermost runtime reconnects promptly when an open websocket closes", async () => {
+  class ReconnectingMattermostApi extends FakeMattermostApi {
+    constructor() {
+      super();
+      this.clients = [];
+    }
+
+    async connectWebSocket(options = {}) {
+      const now = Date.now();
+      const client = {
+        socket: { readyState: 1 },
+        lastActivityAt: now,
+        lastMessageAt: now,
+        closeCalls: 0,
+        close() {
+          this.closeCalls += 1;
+          this.socket.readyState = 3;
+          options.onClose?.({ code: 1000, reason: "test close" });
+        },
+        sendTyping() {
+          return true;
+        }
+      };
+      this.clients.push(client);
+      options.onClient?.(client);
+      options.onOpen?.(client);
+      return client;
+    }
+  }
+
+  const botApi = new ReconnectingMattermostApi();
+  const { runtime } = await createRuntime({ botApi });
+  runtime.watchdogIntervalMs = 1000;
+
+  await runtime.start();
+  await waitFor(() => botApi.clients.length === 1);
+  const firstClient = botApi.clients[0];
+  const closedAt = Date.now();
+  runtime.lastWsCloseAt = null;
+  await waitFor(() => typeof runtime.wakeConnectionLoop === "function");
+  firstClient.close();
+
+  await waitFor(() => botApi.clients.length === 2, 20);
+  await runtime.stop();
+
+  assert.equal(firstClient.closeCalls, 1);
+  assert.equal(runtime.lastWsCloseAt >= closedAt, true);
+  assert.equal(botApi.clients[1].closeCalls, 1);
+});
+
+test("Mattermost runtime points existing sessions at the reconnected websocket", async () => {
+  class ReconnectingMattermostApi extends FakeMattermostApi {
+    constructor() {
+      super();
+      this.clients = [];
+    }
+
+    async connectWebSocket(options = {}) {
+      const now = Date.now();
+      const client = {
+        socket: { readyState: 1 },
+        lastActivityAt: now,
+        lastMessageAt: now,
+        close() {
+          this.socket.readyState = 3;
+        },
+        sendTyping() {
+          return true;
+        }
+      };
+      this.clients.push(client);
+      options.onClient?.(client);
+      options.onOpen?.(client);
+      return client;
+    }
+  }
+
+  const botApi = new ReconnectingMattermostApi();
+  const { runtime } = await createRuntime({ botApi });
+  const session = runtime.sessionFor("channel1");
+
+  await runtime.connect();
+  assert.equal(session.messageRenderer.websocket, botApi.clients[0]);
+
+  botApi.clients[0].socket.readyState = 3;
+  await runtime.connect();
+
+  assert.equal(botApi.clients.length, 2);
+  assert.equal(session.messageRenderer.websocket, botApi.clients[1]);
 });
 
 test("Mattermost runtime treats each direct channel as one session and replies to source thread", async () => {

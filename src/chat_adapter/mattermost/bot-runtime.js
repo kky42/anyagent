@@ -15,6 +15,9 @@ import { CHAT_COMMANDS, ROUTED_COMMAND_NAMES } from "../common/render.js";
 
 export const MATTERMOST_COMMANDS = CHAT_COMMANDS;
 const ROUTED_GROUP_COMMANDS = ROUTED_COMMAND_NAMES;
+const DEFAULT_RECONNECT_DELAY_MS = 2000;
+const DEFAULT_WATCHDOG_INTERVAL_MS = 30000;
+const DEFAULT_STALE_WEBSOCKET_MS = 5 * 60 * 1000;
 
 function unauthorizedMessage(user) {
   const username = String(user?.username ?? "").trim();
@@ -46,13 +49,15 @@ export class BotRuntime {
     botConfig,
     configStore = NOOP_CONFIG_STORE,
     fetchImpl = globalThis.fetch,
-    WebSocketImpl = globalThis.WebSocket,
+    WebSocketImpl = undefined,
     botApi = null,
     createAgentRun = null,
     createCodexRun = null,
     cacheRootDir = DEFAULT_CACHE_PATH,
     groupHistoryHours = DEFAULT_GROUP_HISTORY_HOURS,
-    groupHistoryMessages = DEFAULT_GROUP_HISTORY_MESSAGES
+    groupHistoryMessages = DEFAULT_GROUP_HISTORY_MESSAGES,
+    watchdogIntervalMs = DEFAULT_WATCHDOG_INTERVAL_MS,
+    staleWebSocketMs = DEFAULT_STALE_WEBSOCKET_MS
   }) {
     this.botConfig = botConfig;
     this.configStore = configStore;
@@ -76,10 +81,19 @@ export class BotRuntime {
     this.users = new Map();
     this.groupHistoryHours = groupHistoryHours;
     this.groupHistoryMessages = groupHistoryMessages;
-    this.reconnectDelayMs = 2000;
+    this.reconnectDelayMs = DEFAULT_RECONNECT_DELAY_MS;
+    this.watchdogIntervalMs = watchdogIntervalMs;
+    this.staleWebSocketMs = staleWebSocketMs;
     this.stopRequested = false;
     this.connectPromise = null;
     this.pendingWebSocket = null;
+    this.lastWsOpenAt = null;
+    this.lastWsActivityAt = null;
+    this.lastWsMessageAt = null;
+    this.lastWsErrorAt = null;
+    this.lastWsCloseAt = null;
+    this.reconnectCount = 0;
+    this.wakeConnectionLoop = null;
   }
 
   log(message) {
@@ -327,6 +341,31 @@ export class BotRuntime {
             client.close?.();
           }
         },
+        onOpen: (client) => {
+          this.lastWsOpenAt = client.openedAt ?? Date.now();
+          this.lastWsActivityAt = client.lastActivityAt ?? client.lastMessageAt ?? this.lastWsOpenAt;
+          this.lastWsMessageAt = client.lastMessageAt ?? this.lastWsOpenAt;
+          this.log(`websocket open: reconnect_count=${this.reconnectCount}`);
+        },
+        onActivity: (now) => {
+          this.lastWsActivityAt = now;
+        },
+        onMessage: () => {
+          const now = Date.now();
+          this.lastWsActivityAt = now;
+          this.lastWsMessageAt = now;
+        },
+        onError: () => {
+          this.lastWsErrorAt = Date.now();
+        },
+        onClose: ({ code, reason } = {}, client) => {
+          this.lastWsCloseAt = Date.now();
+          this.log(`websocket close observed: code=${code ?? "unknown"} reason=${reason || "none"}`);
+          if (!client || this.websocket === client) {
+            this.websocket = null;
+          }
+          this.wakeConnectionLoop?.();
+        },
         onEvent: async (event) => {
           if (event.event === "posted") {
             await this.handleEvent(event);
@@ -344,6 +383,8 @@ export class BotRuntime {
       }
 
       this.websocket = websocket;
+      this.reconnectCount += 1;
+      this.log(`websocket reconnect success: count=${this.reconnectCount}`);
 
       for (const session of this.sessions.values()) {
         session.setWebSocket(this.websocket);
@@ -358,6 +399,56 @@ export class BotRuntime {
     }
   }
 
+  isWebSocketStale(now = Date.now()) {
+    if (!this.websocket || this.websocket.socket?.readyState !== 1) {
+      return false;
+    }
+    const lastActivityAt =
+      this.websocket.lastActivityAt ?? this.websocket.lastMessageAt ?? this.lastWsActivityAt ?? this.lastWsMessageAt ?? this.lastWsOpenAt;
+    return Boolean(lastActivityAt && now - lastActivityAt > this.staleWebSocketMs);
+  }
+
+  closeStaleWebSocket(now = Date.now()) {
+    if (!this.isWebSocketStale(now)) {
+      return false;
+    }
+    const lastActivityAt =
+      this.websocket?.lastActivityAt ?? this.websocket?.lastMessageAt ?? this.lastWsActivityAt ?? this.lastWsMessageAt ?? this.lastWsOpenAt;
+    this.log(
+      `websocket stale: last_activity_at=${lastActivityAt ?? "unknown"} stale_ms=${now - lastActivityAt}; reconnecting`
+    );
+    const websocket = this.websocket;
+    this.websocket = null;
+    websocket?.close?.();
+    return true;
+  }
+
+  waitForConnectionLoopWake(ms) {
+    return new Promise((resolve) => {
+      const previousWake = this.wakeConnectionLoop;
+      let settled = false;
+      let timer = null;
+      const wake = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (timer) {
+          clearTimeout(timer);
+        }
+        if (this.wakeConnectionLoop === wake) {
+          this.wakeConnectionLoop = previousWake;
+        }
+        resolve();
+      };
+      this.wakeConnectionLoop = wake;
+      timer = setTimeout(wake, ms);
+      if (this.stopRequested || this.websocket?.socket?.readyState !== 1) {
+        wake();
+      }
+    });
+  }
+
   async start() {
     if (this.running) {
       return;
@@ -370,13 +461,17 @@ export class BotRuntime {
         try {
           await this.connect();
           while (!this.stopRequested && this.websocket?.socket?.readyState === 1) {
-            await sleep(1000);
+            if (this.closeStaleWebSocket()) {
+              break;
+            }
+            await this.waitForConnectionLoopWake(this.watchdogIntervalMs);
           }
         } catch (error) {
           if (this.stopRequested) {
             break;
           }
-          this.log(`mattermost connection failure: ${toErrorMessage(error)}`);
+          this.lastWsErrorAt = Date.now();
+          this.log(`mattermost connection failure: ${toErrorMessage(error)}; retrying in ${this.reconnectDelayMs}ms`);
           await sleep(this.reconnectDelayMs);
         }
       }
@@ -386,6 +481,7 @@ export class BotRuntime {
   async stop() {
     this.stopRequested = true;
     this.running = false;
+    this.wakeConnectionLoop?.();
     this.pendingWebSocket?.close?.();
     this.pendingWebSocket = null;
     this.websocket?.close?.();

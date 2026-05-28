@@ -194,6 +194,154 @@ test("MattermostWebSocketClient authenticates and sends typing actions", async (
   ]);
 });
 
+test("MattermostWebSocketClient times out a websocket that never opens", async () => {
+  const sockets = [];
+  class HangingWebSocket {
+    constructor() {
+      this.readyState = 0;
+      this.closeCalls = 0;
+      this.listeners = new Map();
+      sockets.push(this);
+    }
+
+    addEventListener(name, listener) {
+      this.listeners.set(name, listener);
+    }
+
+    removeEventListener(name) {
+      this.listeners.delete(name);
+    }
+
+    close() {
+      this.closeCalls += 1;
+      this.readyState = 3;
+    }
+  }
+
+  await assert.rejects(
+    new MattermostWebSocketClient({
+      serverUrl: "https://mattermost.example.com",
+      token: "token",
+      WebSocketImpl: HangingWebSocket,
+      openTimeoutMs: 5
+    }).connect(),
+    /Mattermost WebSocket open timed out after 5ms/
+  );
+
+  assert.equal(sockets.length, 1);
+  assert.equal(sockets[0].closeCalls, 1);
+});
+
+test("MattermostWebSocketClient tracks socket activity, messages, and close details", async () => {
+  const activities = [];
+  const closes = [];
+  class FakeWebSocket {
+    constructor() {
+      this.readyState = 1;
+      this.listeners = new Map();
+    }
+
+    addEventListener(name, listener) {
+      const listeners = this.listeners.get(name) ?? [];
+      listeners.push(listener);
+      this.listeners.set(name, listeners);
+    }
+
+    removeEventListener(name, listener) {
+      const listeners = this.listeners.get(name) ?? [];
+      this.listeners.set(name, listeners.filter((entry) => entry !== listener));
+    }
+
+    send() {}
+
+    emit(name, ...args) {
+      for (const listener of this.listeners.get(name) ?? []) {
+        listener(...args);
+      }
+    }
+  }
+
+  const client = await new MattermostWebSocketClient({
+    serverUrl: "https://mattermost.example.com",
+    token: "token",
+    WebSocketImpl: FakeWebSocket
+  }).connect({
+    onActivity: (now) => activities.push(now),
+    onClose: (close) => closes.push(close)
+  });
+
+  client.lastActivityAt = 1;
+  client.lastMessageAt = 1;
+  client.socket.emit("ping");
+  client.socket.emit("pong");
+  assert.ok(client.lastActivityAt > 1);
+  assert.equal(client.lastMessageAt, 1);
+
+  client.socket.emit("message", {
+    data: JSON.stringify({
+      event: "hello",
+      data: {}
+    })
+  });
+  client.socket.emit("close", 1006, Buffer.from("network reset"));
+
+  assert.equal(activities.length, 3);
+  assert.ok(client.lastActivityAt > 1);
+  assert.ok(client.lastMessageAt > 1);
+  assert.deepEqual(closes, [{ code: 1006, reason: "network reset" }]);
+  assert.deepEqual(client.lastClose, { code: 1006, reason: "network reset" });
+});
+
+test("MattermostApi forwards websocket lifecycle callbacks", async () => {
+  const calls = [];
+  class FakeWebSocket {
+    constructor() {
+      this.readyState = 1;
+      this.listeners = new Map();
+    }
+
+    addEventListener(name, listener) {
+      const listeners = this.listeners.get(name) ?? [];
+      listeners.push(listener);
+      this.listeners.set(name, listeners);
+    }
+
+    removeEventListener(name, listener) {
+      const listeners = this.listeners.get(name) ?? [];
+      this.listeners.set(name, listeners.filter((entry) => entry !== listener));
+    }
+
+    send() {}
+
+    emit(name, ...args) {
+      for (const listener of this.listeners.get(name) ?? []) {
+        listener(...args);
+      }
+    }
+  }
+
+  const api = new MattermostApi({
+    serverUrl: "https://mattermost.example.com",
+    token: "token",
+    WebSocketImpl: FakeWebSocket,
+    fetchImpl: async () => jsonResponse({})
+  });
+
+  const client = await api.connectWebSocket({
+    onOpen: () => calls.push("open"),
+    onActivity: () => calls.push("activity"),
+    onMessage: () => calls.push("message"),
+    onError: () => calls.push("error"),
+    onClose: ({ code, reason }) => calls.push(`close:${code}:${reason}`)
+  });
+  client.socket.emit("ping");
+  client.socket.emit("message", { data: "{}" });
+  client.socket.emit("error", { message: "boom" });
+  client.socket.emit("close", 1006, "done");
+
+  assert.deepEqual(calls, ["open", "activity", "activity", "message", "error", "close:1006:done"]);
+});
+
 test("MattermostWebSocketClient logs rejected event handlers", async () => {
   const logs = [];
   class FakeWebSocket {

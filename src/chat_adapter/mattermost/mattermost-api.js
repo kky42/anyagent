@@ -5,6 +5,8 @@ import WebSocket from "ws";
 
 import { toErrorMessage } from "../../utils.js";
 
+export const DEFAULT_WEBSOCKET_OPEN_TIMEOUT_MS = 15000;
+
 export class MattermostApiError extends Error {
   constructor(message, options = {}) {
     super(message);
@@ -49,8 +51,30 @@ function requestHeaders(token, headers = {}) {
   };
 }
 
-function websocketOpen(socket) {
+function closeReasonText(value) {
+  if (Buffer.isBuffer(value)) {
+    return value.toString("utf8");
+  }
+  return String(value ?? "");
+}
+
+function normalizeCloseEvent(eventOrCode, reason) {
+  const code =
+    typeof eventOrCode === "number"
+      ? eventOrCode
+      : Number.isFinite(eventOrCode?.code)
+        ? eventOrCode.code
+        : null;
+  return {
+    code,
+    reason: closeReasonText(reason ?? eventOrCode?.reason)
+  };
+}
+
+function websocketOpen(socket, { timeoutMs = DEFAULT_WEBSOCKET_OPEN_TIMEOUT_MS } = {}) {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer = null;
     const addListener = (name, handler) => {
       if (typeof socket.addEventListener === "function") {
         socket.addEventListener(name, handler, { once: true });
@@ -70,32 +94,50 @@ function websocketOpen(socket) {
       }
     };
     const cleanup = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
       removeListener("open", handleOpen);
       removeListener("error", handleError);
       removeListener("close", handleClose);
     };
-    const handleOpen = () => {
+    const settle = (fn, value) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
       cleanup();
-      resolve();
+      fn(value);
+    };
+    const handleOpen = () => {
+      settle(resolve);
     };
     const handleError = (event) => {
-      cleanup();
-      reject(new MattermostApiError(`Mattermost WebSocket failed to open: ${event?.message ?? "connection error"}`));
+      settle(
+        reject,
+        new MattermostApiError(`Mattermost WebSocket failed to open: ${event?.message ?? "connection error"}`)
+      );
     };
     const handleClose = () => {
-      cleanup();
-      reject(new MattermostApiError("Mattermost WebSocket closed before opening"));
+      settle(reject, new MattermostApiError("Mattermost WebSocket closed before opening"));
     };
 
     addListener("open", handleOpen);
     addListener("error", handleError);
     addListener("close", handleClose);
+    if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+      timer = setTimeout(() => {
+        settle(
+          reject,
+          new MattermostApiError(`Mattermost WebSocket open timed out after ${timeoutMs}ms`)
+        );
+      }, timeoutMs);
+    }
     if (socket.readyState === 1) {
-      cleanup();
-      resolve();
+      settle(resolve);
     } else if (socket.readyState === 2 || socket.readyState === 3) {
-      cleanup();
-      reject(new MattermostApiError("Mattermost WebSocket closed before opening"));
+      settle(reject, new MattermostApiError("Mattermost WebSocket closed before opening"));
     }
   });
 }
@@ -104,7 +146,8 @@ export class MattermostWebSocketClient {
   constructor({
     serverUrl,
     token,
-    WebSocketImpl = globalThis.WebSocket ?? WebSocket,
+    WebSocketImpl = WebSocket,
+    openTimeoutMs = DEFAULT_WEBSOCKET_OPEN_TIMEOUT_MS,
     logger = () => {}
   }) {
     if (!WebSocketImpl) {
@@ -114,30 +157,68 @@ export class MattermostWebSocketClient {
     this.url = normalizeWebSocketUrl(serverUrl);
     this.token = token;
     this.WebSocketImpl = WebSocketImpl;
+    this.openTimeoutMs = openTimeoutMs;
     this.logger = logger;
     this.socket = null;
     this.sequence = 1;
     this.onEvent = null;
+    this.onOpen = null;
+    this.onActivity = null;
+    this.onMessage = null;
+    this.onError = null;
+    this.onClose = null;
     this.eventQueue = Promise.resolve();
     this.closed = false;
+    this.openedAt = null;
+    this.lastActivityAt = null;
+    this.lastMessageAt = null;
+    this.lastErrorAt = null;
+    this.lastCloseAt = null;
+    this.lastClose = null;
   }
 
-  async connect({ onEvent, onClient } = {}) {
+  async connect({ onEvent, onClient, onOpen, onActivity, onMessage, onError, onClose } = {}) {
     this.onEvent = onEvent ?? null;
+    this.onOpen = onOpen ?? null;
+    this.onActivity = onActivity ?? null;
+    this.onMessage = onMessage ?? null;
+    this.onError = onError ?? null;
+    this.onClose = onClose ?? null;
     this.closed = false;
     this.socket = new this.WebSocketImpl(this.url);
     this.addSocketListener("message", (event) => this.handleMessage(event));
+    this.addSocketListener("ping", () => this.markActivity());
+    this.addSocketListener("pong", () => this.markActivity());
     this.addSocketListener("error", (event) => {
+      this.lastErrorAt = Date.now();
+      this.onError?.(event);
       this.logger(`websocket error: ${event?.message ?? "connection error"}`);
+    });
+    this.addSocketListener("close", (eventOrCode, reason) => {
+      const close = normalizeCloseEvent(eventOrCode, reason);
+      this.closed = true;
+      this.lastCloseAt = Date.now();
+      this.lastClose = close;
+      this.onClose?.(close, this);
+      this.logger(`websocket close: code=${close.code ?? "unknown"} reason=${close.reason || "none"}`);
     });
     onClient?.(this);
     if (this.closed) {
       throw new MattermostApiError("Mattermost WebSocket closed before opening");
     }
-    await websocketOpen(this.socket);
-    if (this.closed) {
-      throw new MattermostApiError("Mattermost WebSocket closed before opening");
+    try {
+      await websocketOpen(this.socket, { timeoutMs: this.openTimeoutMs });
+      if (this.closed) {
+        throw new MattermostApiError("Mattermost WebSocket closed before opening");
+      }
+    } catch (error) {
+      this.close();
+      throw error;
     }
+    this.openedAt = Date.now();
+    this.lastActivityAt = this.openedAt;
+    this.lastMessageAt = this.openedAt;
+    this.onOpen?.(this);
     this.authenticate();
     return this;
   }
@@ -152,6 +233,12 @@ export class MattermostWebSocketClient {
     }
   }
 
+  markActivity(now = Date.now()) {
+    this.lastActivityAt = now;
+    this.onActivity?.(now);
+    return now;
+  }
+
   authenticate() {
     this.sendAction("authentication_challenge", {
       token: this.token
@@ -159,6 +246,9 @@ export class MattermostWebSocketClient {
   }
 
   handleMessage(event) {
+    const now = this.markActivity();
+    this.lastMessageAt = now;
+    this.onMessage?.(event);
     const raw =
       typeof event?.data === "string"
         ? event.data
@@ -220,7 +310,8 @@ export class MattermostApi {
     serverUrl,
     token,
     fetchImpl = globalThis.fetch,
-    WebSocketImpl = globalThis.WebSocket ?? WebSocket,
+    WebSocketImpl = WebSocket,
+    webSocketOpenTimeoutMs = DEFAULT_WEBSOCKET_OPEN_TIMEOUT_MS,
     logger = () => {}
   }) {
     if (!fetchImpl) {
@@ -231,6 +322,7 @@ export class MattermostApi {
     this.token = token;
     this.fetch = fetchImpl;
     this.WebSocketImpl = WebSocketImpl;
+    this.webSocketOpenTimeoutMs = webSocketOpenTimeoutMs;
     this.logger = logger;
     this.apiBaseUrl = `${this.serverUrl}/api/v4`;
   }
@@ -398,14 +490,15 @@ export class MattermostApi {
     return Buffer.concat(chunks);
   }
 
-  connectWebSocket({ onEvent, onClient } = {}) {
+  connectWebSocket({ onEvent, onClient, onOpen, onActivity, onMessage, onError, onClose } = {}) {
     const client = new MattermostWebSocketClient({
       serverUrl: this.serverUrl,
       token: this.token,
       WebSocketImpl: this.WebSocketImpl,
+      openTimeoutMs: this.webSocketOpenTimeoutMs,
       logger: this.logger
     });
-    return client.connect({ onEvent, onClient });
+    return client.connect({ onEvent, onClient, onOpen, onActivity, onMessage, onError, onClose });
   }
 }
 
