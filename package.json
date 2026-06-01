@@ -1,6 +1,6 @@
 {
   "name": "@kky42/anyagent",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Lightweight chat relay for CLI coding agents",
   "type": "module",
   "bin": {

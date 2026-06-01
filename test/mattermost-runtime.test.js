@@ -563,23 +563,32 @@ test("Mattermost group commands without a bot target are rejected", async () => 
 });
 
 test("Mattermost runtime ignores group commands addressed to another bot", async () => {
-  const { runtime, botApi, runnerFactory } = await createRuntime();
-  botApi.channels.set("channel1", { id: "channel1", type: "O" });
-  botApi.users.set("u1", { id: "u1", username: "alice" });
+  const messages = [
+    "!status@otherbot",
+    "!status @otherbot",
+    "@otherbot !status",
+    "@otherbot /status"
+  ];
 
-  await runtime.handleEvent(postedEvent({
-    id: "post1",
-    channel_id: "channel1",
-    user_id: "u1",
-    message: "!status@otherbot",
-    create_at: 1000,
-    file_ids: []
-  }));
-  await flush();
+  for (const message of messages) {
+    const { runtime, botApi, runnerFactory } = await createRuntime();
+    botApi.channels.set("channel1", { id: "channel1", type: "O" });
+    botApi.users.set("u1", { id: "u1", username: "alice" });
 
-  assert.equal(runnerFactory.runs.length, 0);
-  assert.equal(botApi.posts.length, 0);
-  assert.equal(runtime.sessions.size, 0);
+    await runtime.handleEvent(postedEvent({
+      id: `post-${message}`,
+      channel_id: "channel1",
+      user_id: "u1",
+      message,
+      create_at: 1000,
+      file_ids: []
+    }));
+    await flush();
+
+    assert.equal(runnerFactory.runs.length, 0, message);
+    assert.equal(botApi.posts.length, 0, message);
+    assert.equal(runtime.sessions.size, 0, message);
+  }
 });
 
 test("Mattermost group transcripts include sender nickname and username", async () => {

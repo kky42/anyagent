@@ -4,23 +4,38 @@ function normalizeMattermostUsername(username) {
   return String(username || "").trim().replace(/^@+/, "").toLowerCase();
 }
 
-function stripLeadingBotMention(text, botUsername) {
+function isCommandText(text) {
+  return String(text || "").startsWith("/") || String(text || "").startsWith("!");
+}
+
+function leadingMentionTarget(text, botUsername) {
   const trimmed = String(text || "").trim();
   const normalizedBotUsername = normalizeMattermostUsername(botUsername);
-  if (!normalizedBotUsername || !trimmed.startsWith("@")) {
-    return trimmed;
+  if (!trimmed.startsWith("@")) {
+    return null;
   }
 
   const [token] = trimmed.split(/\s+/, 1);
-  if (normalizeMattermostUsername(token) !== normalizedBotUsername) {
-    return trimmed;
+  const username = normalizeMattermostUsername(token);
+  if (!username) {
+    return null;
   }
-  return trimmed.slice(token.length).trim();
+
+  return {
+    target: normalizedBotUsername && username === normalizedBotUsername ? "self" : "other",
+    username,
+    text: trimmed.slice(token.length).trim()
+  };
 }
 
 export function parseCommand(text, botUsername) {
-  const trimmed = stripLeadingBotMention(text, botUsername);
-  if (!trimmed.startsWith("/") && !trimmed.startsWith("!")) {
+  const originalText = String(text || "").trim();
+  const leadingTarget = leadingMentionTarget(originalText, botUsername);
+  const trimmed =
+    leadingTarget?.target === "self" || isCommandText(leadingTarget?.text)
+      ? leadingTarget.text
+      : originalText;
+  if (!isCommandText(trimmed)) {
     return null;
   }
 
@@ -37,6 +52,16 @@ export function parseCommand(text, botUsername) {
   }
 
   const rawArgs = trimmed.slice(token.length).trim();
+  if (leadingTarget?.target === "other") {
+    return {
+      command: commandName.toLowerCase(),
+      args: rawArgs,
+      commandLike: true,
+      target: "other",
+      ignored: true
+    };
+  }
+
   const bot = normalizeMattermostUsername(botUsername);
   const args = rawArgs
     .split(/\s+/)
@@ -45,7 +70,7 @@ export function parseCommand(text, botUsername) {
     .trim();
   const hasSelfTarget =
     Boolean(mention) ||
-    normalizeMattermostUsername(String(text || "").trim().split(/\s+/, 1)[0]) === bot ||
+    leadingTarget?.target === "self" ||
     rawArgs.split(/\s+/).some((arg) => normalizeMattermostUsername(arg) === bot);
   const hasOtherTarget =
     !hasSelfTarget &&
@@ -64,8 +89,7 @@ export function parseCommand(text, botUsername) {
 }
 
 export async function routeTextMessage({ text, botUsername, session, runtime, replyTarget = null }) {
-  const normalizedText = stripLeadingBotMention(text, botUsername);
-  const parsedCommand = parseCommand(normalizedText, botUsername);
+  const parsedCommand = parseCommand(text, botUsername);
   if (parsedCommand?.ignored) {
     return;
   }
@@ -73,7 +97,7 @@ export async function routeTextMessage({ text, botUsername, session, runtime, re
   await routeCommandOrTurn({
     command: parsedCommand?.command,
     args: parsedCommand?.args,
-    text: parsedCommand ? normalizedText : text,
+    text,
     session,
     runtime,
     replyTarget

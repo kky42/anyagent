@@ -130,7 +130,7 @@ In direct messages, each Mattermost direct channel maps to one agent session. In
 
 Mattermost channel posts, group messages, and threads are group-like chats. A Mattermost thread gets its own agent session keyed by the thread root. The first turn in a thread includes the thread root as a normal transcript message before the new message.
 
-Group-like Mattermost commands must mention the bot, for example `!status @your_bot_username` or `!auto high @your_bot_username`. `@your_bot_username !status` and `!status@your_bot_username` are also accepted.
+Group-like Mattermost commands must mention the bot, for example `!status @your_bot_username` or `!auto high @your_bot_username`. `@your_bot_username !status` and `!status@your_bot_username` are also accepted. Commands addressed to another bot with the same target forms, including `@other_bot !status` and `@other_bot /status`, are ignored.
 
 Mattermost renders the agent output as native Markdown, including tables and fenced code blocks. The relay uses Mattermost post edits for transient progress and WebSocket typing indicators for active runs.
 Unlike Telegram, Mattermost bot accounts can receive posts from other bots in the same channel or thread. AnyAgent still ignores its own bot posts, but another bot's post can appear in the transcript and can trigger the agent.
