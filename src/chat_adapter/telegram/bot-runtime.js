@@ -1,16 +1,15 @@
 import { DEFAULT_CACHE_PATH, normalizeTelegramUsername, sleep, toErrorMessage } from "../../utils.js";
 import { ALBUM_QUIET_PERIOD_MS, hasSupportedAttachment, unsupportedAttachmentMessage } from "./attachments.js";
 import { ChatSession, replyTargetFromTelegramMessage } from "./chat-session.js";
-import { parseCommand, routeTextMessage } from "./command-router.js";
+import { parseCommand, routeKnownTextCommand } from "./command-router.js";
 import { renderGroupInputMessage } from "./group-input.js";
 import { MediaGroupBuffer } from "./media-group-buffer.js";
 import { NOOP_CONFIG_STORE } from "../common/session-persistence.js";
 import { TelegramApiError, TelegramBotApi } from "./telegram-api.js";
-import { CHAT_COMMANDS, ROUTED_COMMAND_NAMES } from "../common/render.js";
+import { CHAT_COMMANDS } from "../common/render.js";
+import { resetSession } from "../common/session-reset.js";
 
 export const TELEGRAM_COMMANDS = CHAT_COMMANDS;
-
-const ROUTED_GROUP_COMMANDS = ROUTED_COMMAND_NAMES;
 
 function unauthorizedMessage(user) {
   const username = normalizeTelegramUsername(user?.username);
@@ -19,6 +18,15 @@ function unauthorizedMessage(user) {
   }
 
   return "You are not authorized to use this bot. Your Telegram account has no username set. Add one in Telegram Settings, then add it to allowedUsernames in this Telegram binding.";
+}
+
+const COMMAND_REJECTION_UNAUTHORIZED = "Only manager users can run AnyAgent commands.";
+const COMMAND_REJECTION_OTHER_BOT = "That command targets another bot.";
+const UNKNOWN_COMMAND_MESSAGE = "Unknown command.";
+
+function missingTargetMessage(botUsername) {
+  const suffix = botUsername ? `@${botUsername}` : "@this_bot";
+  return `Group commands must mention this bot, for example /status ${suffix}.`;
 }
 
 const IGNORED_SERVICE_MESSAGE_FIELDS = [
@@ -135,7 +143,21 @@ export class BotRuntime {
 
   isAuthorized(user) {
     const username = normalizeTelegramUsername(user?.username);
-    return Boolean(username && this.botConfig.allowedUsernames.includes(username));
+    const managerUsernames = Array.isArray(this.botConfig.managerUsernames)
+      ? this.botConfig.managerUsernames
+      : [];
+    return Boolean(
+      username &&
+      (this.botConfig.allowedUsernames.includes(username) || managerUsernames.includes(username))
+    );
+  }
+
+  isManager(user) {
+    const username = normalizeTelegramUsername(user?.username);
+    const managerUsernames = Array.isArray(this.botConfig.managerUsernames)
+      ? this.botConfig.managerUsernames
+      : this.botConfig.allowedUsernames;
+    return Boolean(username && managerUsernames.includes(username));
   }
 
   async initialize() {
@@ -160,6 +182,13 @@ export class BotRuntime {
       botName: this.botDisplayName,
       botHandle: botUsername ? `@${botUsername}` : "@unknown"
     };
+  }
+
+  async resetSessions() {
+    this.mediaGroupBuffer.clear();
+    await Promise.all([...this.sessions.values()].map((session) =>
+      resetSession(session, { clearPersistedState: true })
+    ));
   }
 
   async discardPendingUpdates() {
@@ -240,13 +269,29 @@ export class BotRuntime {
 
     const text = message.text;
     if (typeof text === "string" && text.trim()) {
-      await routeTextMessage({
-        text,
-        botUsername: this.botUsername,
-        session,
-        runtime: this,
-        replyTarget
-      });
+      const parsedCommand = parseCommand(text, this.botUsername);
+      if (parsedCommand?.ignored) {
+        await session.sendText(COMMAND_REJECTION_OTHER_BOT, { replyTarget });
+        return;
+      }
+      if (parsedCommand?.commandLike) {
+        if (!this.isManager(message.from)) {
+          await session.sendText(COMMAND_REJECTION_UNAUTHORIZED, { replyTarget });
+          return;
+        }
+        const routed = await routeKnownTextCommand({
+          parsedCommand,
+          session,
+          runtime: this,
+          replyTarget
+        });
+        if (!routed) {
+          await session.sendText(UNKNOWN_COMMAND_MESSAGE, { replyTarget });
+        }
+        return;
+      }
+
+      await session.enqueueMessage(text, { replyTarget });
       return;
     }
 
@@ -259,24 +304,45 @@ export class BotRuntime {
       return;
     }
 
-    const session = this.sessionFor(chatId, { conversationId });
     const text = messageText(message);
     const parsedCommand = parseCommand(text, this.botUsername ?? this.botConfig.username);
-    if (ROUTED_GROUP_COMMANDS.has(parsedCommand?.command)) {
-      if (!this.isAuthorized(message.from)) {
-        return;
-      }
-      await routeTextMessage({
-        text,
-        botUsername: this.botUsername ?? this.botConfig.username,
-        session,
-        runtime: this,
-        replyTarget: replyTargetFromTelegramMessage(message)
+    if (parsedCommand?.ignored) {
+      return;
+    }
+    const isCommandLike = Boolean(parsedCommand?.commandLike);
+    const replyTarget = replyTargetFromTelegramMessage(message);
+    if (isCommandLike && parsedCommand.target === "none") {
+      const session = this.sessionFor(chatId, { conversationId });
+      await session.sendText(missingTargetMessage(this.botUsername ?? this.botConfig.username), {
+        replyTarget
       });
       return;
     }
 
-    if (hasSupportedAttachment(message)) {
+    const supportedAttachment = hasSupportedAttachment(message);
+    if (!text.trim() && !supportedAttachment) {
+      return;
+    }
+
+    const session = this.sessionFor(chatId, { conversationId });
+    if (isCommandLike) {
+      if (!this.isManager(message.from)) {
+        await session.sendText(COMMAND_REJECTION_UNAUTHORIZED, { replyTarget });
+        return;
+      }
+      const routed = await routeKnownTextCommand({
+        parsedCommand,
+        session,
+        runtime: this,
+        replyTarget
+      });
+      if (!routed) {
+        await session.sendText(UNKNOWN_COMMAND_MESSAGE, { replyTarget });
+      }
+      return;
+    }
+
+    if (supportedAttachment) {
       await this.mediaGroupBuffer.queue(session, message, (messages) =>
         this.handleGroupTriggerMessages({ session, messages, triggerMessage: message })
       );

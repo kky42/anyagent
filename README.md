@@ -38,7 +38,7 @@ Edit the generated config:
 ~/.anyagent/agents/main/config.json
 ```
 
-Set your chat bot credentials, allowed username, and local workdir.
+Set your chat bot credentials, allowed username, manager username, and local workdir.
 
 Start the relay:
 
@@ -71,20 +71,24 @@ A fuller config example looks like this:
   "bindings": {
     "telegram": {
       "allowedUsernames": ["your-telegram-username"],
+      "managerUsernames": ["your-telegram-username"],
       "bots": [
         {
           "username": "your_bot_username",
-          "token": "YOUR_TELEGRAM_BOT_TOKEN"
+          "token": "YOUR_TELEGRAM_BOT_TOKEN",
+          "managerUsernames": ["teammate-who-can-change-settings"]
         }
       ]
     },
     "mattermost": {
       "allowedUsernames": ["your-mattermost-username"],
+      "managerUsernames": ["your-mattermost-username"],
       "bots": [
         {
           "serverUrl": "https://mattermost.example.com",
           "username": "your_bot_username",
-          "token": "YOUR_MATTERMOST_BOT_TOKEN"
+          "token": "YOUR_MATTERMOST_BOT_TOKEN",
+          "managerUsernames": ["teammate-who-can-change-settings"]
         }
       ]
     }
@@ -101,7 +105,8 @@ Important fields:
 | `profile.auto` | Permission level for agent actions: `low`, `medium`, or `high`. |
 | `profile.model` | Optional model override. Use `default` to keep the CLI default. |
 | `profile.reasoningEffort` | Optional reasoning override. Use `default` to keep the CLI default. |
-| `allowedUsernames` | Chat usernames allowed to use this bot in direct/private chats. Group-like chats currently ignore this list. |
+| `allowedUsernames` | Chat usernames allowed to talk to the agent in direct/private chats. Group-like chats allow normal participant messages without this list. |
+| `managerUsernames` | Chat usernames allowed to run chat commands. If omitted, `allowedUsernames` are used as managers. Managers are automatically allowed in direct/private chats. |
 | `bots[].token` | Telegram bot token from BotFather. |
 | `mattermost.bots[].serverUrl` | Base URL for the Mattermost server. |
 | `mattermost.bots[].token` | Mattermost bot access token. |
@@ -112,7 +117,9 @@ If you do not know your Telegram username, send the bot any message once. The un
 
 In group chats and supergroups, every non-command message delivered to the bot triggers the agent or joins the next pending agent turn. If multiple unprocessed group messages arrive while the agent is running, AnyAgent sends them to the agent as one plain-text transcript in delivery order, including timestamp, display name, handle, message text, and downloaded attachments next to the message that carried them.
 
-Relay commands such as `/status@your_bot_username` stay relay commands and are not sent to the agent. Telegram forum topics use separate agent sessions. Ordinary replies inside a group do not create separate sessions.
+Group commands must mention the bot, for example `/status @your_bot_username` or `/auto high @your_bot_username`. Commands for another bot are silently ignored. Command-shaped messages are never sent to the agent.
+
+Telegram forum topics use separate agent sessions. Ordinary replies inside a group do not create separate sessions.
 
 Telegram bots cannot fetch arbitrary past group history through the Bot API. After a daemon restart, AnyAgent starts fresh sessions and only sees messages delivered after startup. If the bot runs with Telegram Privacy Mode enabled, Telegram may only deliver commands, mentions, and replies to the bot; disable Privacy Mode or make the bot an admin if you need every group message to trigger the agent.
 Telegram bots also do not receive messages from other bots, so one bot in a group will not react to another bot's posts.
@@ -122,6 +129,8 @@ Telegram bots also do not receive messages from other bots, so one bot in a grou
 In direct messages, each Mattermost direct channel maps to one agent session. In channels and group messages, every non-command post triggers the agent or joins the next pending agent turn.
 
 Mattermost channel posts, group messages, and threads are group-like chats. A Mattermost thread gets its own agent session keyed by the thread root. The first turn in a thread includes the thread root as a normal transcript message before the new message.
+
+Group-like Mattermost commands must mention the bot, for example `!status @your_bot_username` or `!auto high @your_bot_username`. `@your_bot_username !status` and `!status@your_bot_username` are also accepted.
 
 Mattermost renders the agent output as native Markdown, including tables and fenced code blocks. The relay uses Mattermost post edits for transient progress and WebSocket typing indicators for active runs.
 Unlike Telegram, Mattermost bot accounts can receive posts from other bots in the same channel or thread. AnyAgent still ignores its own bot posts, but another bot's post can appear in the transcript and can trigger the agent.
@@ -148,6 +157,8 @@ The relay sends visible group messages and attachments in the order they appear 
 
 Telegram commands use `/`. Mattermost commands use `!` because Mattermost handles `/` slash commands before they reach this WebSocket relay unless you configure a separate slash-command integration.
 
+All chat commands require a manager username. In direct/private chats, the bot target is optional. In group-like chats, commands without a bot target are rejected with a visible warning, commands targeting another bot are ignored, and unknown commands are rejected instead of being sent to the agent.
+
 | Telegram | Mattermost | Purpose |
 | --- | --- | --- |
 | `/status` | `!status` | Show current state, CLI, workdir, settings, context length, and queued messages. |
@@ -158,7 +169,7 @@ Telegram commands use `/`. Mattermost commands use `!` because Mattermost handle
 | `/reasoning` | `!reasoning` | Show or change reasoning effort. |
 | `/abort` | `!abort` | Stop the active run and clear queued messages. |
 | `/new` | `!new` | Start a fresh agent session for this chat. |
-| `/reset` | `!reset` | Reload config from disk and clear chat-specific overrides. |
+| `/reset` | `!reset` | Reload config defaults for this chat and clear chat-specific overrides. |
 | `/clear_cache` | `!clear_cache` | Delete cached attachments for this chat. |
 
 Examples:
@@ -186,6 +197,13 @@ pm2 start anyagent --name anyagent
 pm2 save
 ```
 
+With a custom config directory, pass the config path after `--` so PM2 gives it to AnyAgent:
+
+```bash
+pm2 start anyagent --name anyagent -- --config /path/to/agents
+pm2 save
+```
+
 Useful PM2 commands:
 
 ```bash
@@ -194,6 +212,8 @@ pm2 logs anyagent
 pm2 restart anyagent
 pm2 stop anyagent
 ```
+
+Restart the relay process to apply global config changes. A process restart reloads all agent profiles and chat bindings from disk, so newly added agents start running, removed agents stop, and changed tokens, workdirs, managers, models, or permission defaults are applied. Chat `/reset` only affects the current chat session; it is not a global relay reload.
 
 To update AnyAgent and restart the relay:
 

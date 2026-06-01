@@ -280,7 +280,7 @@ test("common ChatSession reset reloads through generic chat binding config", asy
   assert.deepEqual(output.texts.at(-1).options, { replyTarget: { channelId: "channel-1" } });
 });
 
-test("common command router maps shared commands and treats unknown commands as turns", async () => {
+test("common command router maps shared commands and reports unknown commands", async () => {
   const calls = [];
   const session = {
     async handleStatus(options) {
@@ -288,6 +288,9 @@ test("common command router maps shared commands and treats unknown commands as 
     },
     async handleAuto(args, options) {
       calls.push(["auto", args, options]);
+    },
+    async sendText(text, options) {
+      calls.push(["text", text, options]);
     },
     async enqueueMessage(text, options) {
       calls.push(["turn", text, options]);
@@ -303,7 +306,7 @@ test("common command router maps shared commands and treats unknown commands as 
   await routeCommandOrTurn({ command: "status", session, runtime, replyTarget });
   await routeCommandOrTurn({ command: "auto", args: "high", session, runtime, replyTarget });
   await routeCommandOrTurn({ command: "clear_cache", session, runtime, replyTarget });
-  await routeCommandOrTurn({
+  const routed = await routeCommandOrTurn({
     command: "unknown",
     text: "/unknown keep as prompt",
     session,
@@ -315,6 +318,7 @@ test("common command router maps shared commands and treats unknown commands as 
     ["status", { replyTarget }],
     ["auto", "high", { replyTarget }],
     ["clear_cache", true, { replyTarget }],
-    ["turn", "/unknown keep as prompt", { replyTarget }]
+    ["text", "Unknown command.", { replyTarget }]
   ]);
+  assert.equal(routed, undefined);
 });

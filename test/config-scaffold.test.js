@@ -29,12 +29,14 @@ test("buildCanonicalAgentConfig includes required profile defaults", () => {
       bindings: {
         telegram: {
           allowedUsernames: ["your-telegram-username"],
+          managerUsernames: ["your-telegram-username"],
           bots: []
         },
         mattermost: {
           allowedUsernames: ["your-mattermost-username"],
+          managerUsernames: ["your-mattermost-username"],
           bots: []
-        },
+        }
       }
     }
   );
@@ -108,4 +110,8 @@ test("anyagent add creates an agent config through the CLI", async () => {
   assert.equal(config.profile.cli, "pi");
   assert.equal(config.profile.workdir, os.homedir());
   assert.match(writes.join(""), /Created agent "main"/);
+});
+
+test("anyagent reset is not a supported CLI command", async () => {
+  await assert.rejects(() => main(["reset"]), /Unknown command: reset/);
 });

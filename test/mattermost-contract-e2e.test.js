@@ -93,6 +93,7 @@ async function createRuntime(options = {}) {
     username: "relaybot",
     token: "token",
     allowedUsernames: ["alice"],
+    managerUsernames: ["alice"],
     agent: {
       id: "primary-agent",
       cli: "codex",

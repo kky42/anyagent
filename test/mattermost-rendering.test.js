@@ -75,6 +75,7 @@ async function createMattermostSession(options = {}) {
     username: "relaybot",
     token: "token",
     allowedUsernames: ["alice"],
+    managerUsernames: ["alice"],
     agent: {
       id: "primary-agent",
       cli: "codex",

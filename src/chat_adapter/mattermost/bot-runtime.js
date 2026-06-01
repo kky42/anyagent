@@ -1,14 +1,14 @@
 import { DEFAULT_CACHE_PATH, sleep, toErrorMessage } from "../../utils.js";
 import { NOOP_CONFIG_STORE } from "../common/session-persistence.js";
+import { resetSession } from "../common/session-reset.js";
 import { ChatSession, replyTargetFromMattermostPost } from "./chat-session.js";
 import { MattermostApi, postFromWebSocketEvent } from "./mattermost-api.js";
 import { mattermostUserDisplayName, renderGroupInputPost } from "./group-input.js";
 import { hasSupportedAttachment } from "./attachments.js";
-import { parseCommand, routeTextMessage } from "./command-router.js";
-import { CHAT_COMMANDS, ROUTED_COMMAND_NAMES } from "../common/render.js";
+import { parseCommand, routeKnownTextCommand } from "./command-router.js";
+import { CHAT_COMMANDS } from "../common/render.js";
 
 export const MATTERMOST_COMMANDS = CHAT_COMMANDS;
-const ROUTED_GROUP_COMMANDS = ROUTED_COMMAND_NAMES;
 const DEFAULT_RECONNECT_DELAY_MS = 2000;
 const DEFAULT_WATCHDOG_INTERVAL_MS = 30000;
 const DEFAULT_STALE_WEBSOCKET_MS = 5 * 60 * 1000;
@@ -19,6 +19,15 @@ function unauthorizedMessage(user) {
     return `You are not authorized to use this bot. Your Mattermost username is @${username}. Add "${username}" to allowedUsernames in this Mattermost binding.`;
   }
   return "You are not authorized to use this bot. Add your Mattermost username to allowedUsernames in this Mattermost binding.";
+}
+
+const COMMAND_REJECTION_UNAUTHORIZED = "Only manager users can run AnyAgent commands.";
+const COMMAND_REJECTION_OTHER_BOT = "That command targets another bot.";
+const UNKNOWN_COMMAND_MESSAGE = "Unknown command.";
+
+function missingTargetMessage(botUsername) {
+  const suffix = botUsername ? `@${botUsername}` : "@this_bot";
+  return `Group commands must mention this bot, for example !status ${suffix}.`;
 }
 
 function isBotPost(post, botUserId) {
@@ -173,7 +182,21 @@ export class BotRuntime {
 
   isAuthorized(user) {
     const username = String(user?.username ?? "").trim().replace(/^@+/, "").toLowerCase();
-    return Boolean(username && this.botConfig.allowedUsernames.includes(username));
+    const managerUsernames = Array.isArray(this.botConfig.managerUsernames)
+      ? this.botConfig.managerUsernames
+      : [];
+    return Boolean(
+      username &&
+      (this.botConfig.allowedUsernames.includes(username) || managerUsernames.includes(username))
+    );
+  }
+
+  isManager(user) {
+    const username = String(user?.username ?? "").trim().replace(/^@+/, "").toLowerCase();
+    const managerUsernames = Array.isArray(this.botConfig.managerUsernames)
+      ? this.botConfig.managerUsernames
+      : this.botConfig.allowedUsernames;
+    return Boolean(username && managerUsernames.includes(username));
   }
 
   async initialize() {
@@ -195,6 +218,12 @@ export class BotRuntime {
       botName: this.botDisplayName,
       botHandle: botUsername ? `@${botUsername}` : "@unknown"
     };
+  }
+
+  async resetSessions() {
+    await Promise.all([...this.sessions.values()].map((session) =>
+      resetSession(session, { clearPersistedState: true })
+    ));
   }
 
   async sendDirectMessage(channelId, text) {
@@ -238,9 +267,18 @@ export class BotRuntime {
     }
 
     const channel = await this.channelFor(platformChannelId);
+    if (!channel) {
+      return;
+    }
     const isDirect = this.isDirectChannel(channel);
     const conversationId = isDirect ? platformChannelId : channelLikeConversationId(post);
     if (!conversationId) {
+      return;
+    }
+
+    const text = normalizedPostText(post);
+    const parsedCommand = parseCommand(text, this.botUsername);
+    if (parsedCommand?.ignored && !isDirect) {
       return;
     }
     const session = this.sessionFor(platformChannelId, { conversationId });
@@ -252,24 +290,46 @@ export class BotRuntime {
       return;
     }
 
+    if (parsedCommand?.ignored) {
+      if (isDirect) {
+        await session.sendText(COMMAND_REJECTION_OTHER_BOT, {
+          replyTarget: replyTargetFromMattermostPost(post)
+        });
+      }
+      return;
+    }
+
     if (hasSupportedAttachment(post) && isDirect) {
       await session.handleAttachmentPosts([post]);
       return;
     }
 
-    const text = normalizedPostText(post);
-    const parsedCommand = parseCommand(text, this.botUsername);
-    if (isDirect || ROUTED_GROUP_COMMANDS.has(parsedCommand?.command)) {
-      if (!isDirect && !this.isAuthorized({ username: post?.user?.username ?? post?.username })) {
+    const isCommandLike = Boolean(parsedCommand?.commandLike);
+    const replyTarget = replyTargetFromMattermostPost(post);
+    if (isCommandLike && !isDirect && parsedCommand.target === "none") {
+      await session.sendText(missingTargetMessage(this.botUsername), { replyTarget });
+      return;
+    }
+
+    if (isCommandLike) {
+      if (!this.isManager({ username: post?.user?.username ?? post?.username })) {
+        await session.sendText(COMMAND_REJECTION_UNAUTHORIZED, { replyTarget });
         return;
       }
-      await routeTextMessage({
-        text,
-        botUsername: this.botUsername,
+      const routed = await routeKnownTextCommand({
+        parsedCommand,
         session,
         runtime: this,
-        replyTarget: replyTargetFromMattermostPost(post)
+        replyTarget
       });
+      if (!routed) {
+        await session.sendText(UNKNOWN_COMMAND_MESSAGE, { replyTarget });
+      }
+      return;
+    }
+
+    if (isDirect) {
+      await session.enqueueMessage(text, { replyTarget });
       return;
     }
 

@@ -14,8 +14,6 @@ export const CHAT_COMMANDS = [
   { command: "reset", description: "Reload config defaults for this chat" }
 ];
 
-export const ROUTED_COMMAND_NAMES = new Set(CHAT_COMMANDS.map((command) => command.command));
-
 export function summarizeQueue(queue) {
   if (queue.length === 0) {
     return "empty";

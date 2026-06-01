@@ -51,6 +51,7 @@ test("ConfigStore reloads a telegram bot binding from config.json", async () => 
   assert.equal(botConfig.agent.id, "primary");
   assert.equal(botConfig.agent.workdir, workdir);
   assert.deepEqual(botConfig.allowedUsernames, ["owneruser", "alloweduser"]);
+  assert.deepEqual(botConfig.managerUsernames, ["owneruser", "alloweduser"]);
 
   const bindingConfig = await configStore.loadChatBindingConfig({
     platform: "telegram",
@@ -108,4 +109,5 @@ test("ConfigStore reloads a mattermost bot binding from config.json", async () =
   assert.equal(bindingConfig.serverUrl, "http://localhost:8065");
   assert.equal(bindingConfig.agent.id, "primary");
   assert.deepEqual(bindingConfig.allowedUsernames, ["owneruser", "alloweduser"]);
+  assert.deepEqual(bindingConfig.managerUsernames, ["owneruser", "alloweduser"]);
 });

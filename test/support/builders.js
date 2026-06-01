@@ -25,6 +25,7 @@ export async function createSession(options = {}) {
     username: "relaybot",
     token: "token",
     allowedUsernames: ["alloweduser"],
+    managerUsernames: ["alloweduser"],
     agent,
     ...options.botConfig
   };
@@ -77,6 +78,7 @@ export async function createRuntime(options = {}) {
     username: "relaybot",
     token: "token",
     allowedUsernames: ["alloweduser"],
+    managerUsernames: ["alloweduser"],
     agent,
     ...options.botConfig
   };

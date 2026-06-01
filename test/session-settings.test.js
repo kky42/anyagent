@@ -220,6 +220,7 @@ test("/reset reloads config defaults, clears chat overrides, and starts a new se
   configStore.loadedBotConfig = {
     username: "relaybot",
     allowedUsernames: ["alloweduser"],
+    managerUsernames: ["alloweduser"],
     agent: {
       id: "primary-agent",
       cli: "claude",

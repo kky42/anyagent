@@ -49,10 +49,12 @@ export function buildCanonicalAgentConfig({ cli, workdir = os.homedir() }) {
     bindings: {
       telegram: {
         allowedUsernames: ["your-telegram-username"],
+        managerUsernames: ["your-telegram-username"],
         bots: []
       },
       mattermost: {
         allowedUsernames: ["your-mattermost-username"],
+        managerUsernames: ["your-mattermost-username"],
         bots: []
       }
     }

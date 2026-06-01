@@ -270,15 +270,39 @@ test("runtime routes /cli, /auto, /model, and /reasoning to the current chat ses
   assert.equal(fakeBotApi.messages.at(-1).text, "Reasoning effort set to high.");
 });
 
-test("runtime treats unknown slash commands as normal prompts", async () => {
+test("runtime rejects unknown private slash commands without starting an agent run", async () => {
   const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
 
   await runtime.handleMessage(buildTextMessage("/unknown_command"));
 
-  assert.equal(fakeBotApi.messages.length, 0);
+  assert.equal(runnerFactory.runs.length, 0);
+  assert.equal(fakeBotApi.messages.at(-1).text, "Unknown command.");
+});
+
+test("runtime lets allowed non-manager users send private prompts but not commands", async () => {
+  const { runtime, fakeBotApi, runnerFactory } = await createRuntime({
+    botConfig: {
+      allowedUsernames: ["alloweduser", "owner"],
+      managerUsernames: ["owner"]
+    }
+  });
+
+  await runtime.handleMessage(buildTextMessage("please inspect this stack trace"));
+  await runtime.handleMessage(buildTextMessage("/status"));
+
   assert.equal(runnerFactory.runs.length, 1);
-  assert.equal(runnerFactory.runs[0].params.message, "/unknown_command");
+  assert.equal(runnerFactory.runs[0].params.message, "please inspect this stack trace");
+  assert.equal(fakeBotApi.messages.at(-1).text, "Only manager users can run AnyAgent commands.");
   runnerFactory.runs[0].finish();
+});
+
+test("runtime rejects private commands targeting another Telegram bot", async () => {
+  const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
+
+  await runtime.handleMessage(buildTextMessage("/status @otherbot"));
+
+  assert.equal(runnerFactory.runs.length, 0);
+  assert.equal(fakeBotApi.messages.at(-1).text, "That command targets another bot.");
 });
 
 test("runtime shares one private chat session across Telegram threads but replies to each source thread", async () => {
@@ -602,8 +626,8 @@ test("runtime routes addressed group commands without starting an agent run", as
   const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
 
   await runtime.handleMessage(
-    buildGroupTextMessage("/status@relaybot", {
-      entities: [{ type: "bot_command", offset: 0, length: "/status@relaybot".length }]
+    buildGroupTextMessage("/status @relaybot", {
+      entities: [{ type: "bot_command", offset: 0, length: "/status".length }]
     })
   );
 
@@ -611,18 +635,69 @@ test("runtime routes addressed group commands without starting an agent run", as
   assert.match(fakeBotApi.messages.at(-1).text, /running: no/);
 });
 
-test("runtime ignores relay commands from unauthorized Telegram group users", async () => {
+test("runtime rejects group commands without a Telegram bot target", async () => {
   const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
 
   await runtime.handleMessage(
-    buildGroupTextMessage("/auto@relaybot high", {
-      from: { id: 99, username: "OtherUser" },
-      entities: [{ type: "bot_command", offset: 0, length: "/auto@relaybot".length }]
+    buildGroupTextMessage("/status", {
+      entities: [{ type: "bot_command", offset: 0, length: "/status".length }]
+    })
+  );
+
+  assert.equal(runnerFactory.runs.length, 0);
+  assert.match(fakeBotApi.messages.at(-1).text, /Group commands must mention this bot/);
+});
+
+test("runtime ignores Telegram group commands addressed to another bot", async () => {
+  const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
+
+  await runtime.handleMessage(
+    buildGroupTextMessage("/status@otherbot", {
+      entities: [{ type: "bot_command", offset: 0, length: "/status@otherbot".length }]
     })
   );
 
   assert.equal(runnerFactory.runs.length, 0);
   assert.equal(fakeBotApi.messages.length, 0);
+  assert.equal(runtime.sessions.size, 0);
+});
+
+test("runtime ignores empty unsupported Telegram group updates", async () => {
+  const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
+
+  await runtime.handleMessage({
+    message_id: 1,
+    date: 1700000001,
+    chat: { id: -1001, type: "supergroup" },
+    from: { id: 99, username: "OtherUser" },
+    sticker: { file_id: "sticker-1" }
+  });
+
+  await runtime.handleMessage({
+    message_id: 2,
+    date: 1700000002,
+    chat: { id: -1001, type: "supergroup" },
+    from: { id: 99, username: "OtherUser" },
+    contact: { phone_number: "5550100", first_name: "Mallory" }
+  });
+
+  assert.equal(runnerFactory.runs.length, 0);
+  assert.equal(fakeBotApi.messages.length, 0);
+  assert.equal(runtime.sessions.size, 0);
+});
+
+test("runtime rejects relay commands from unauthorized Telegram group users", async () => {
+  const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
+
+  await runtime.handleMessage(
+    buildGroupTextMessage("/auto high @relaybot", {
+      from: { id: 99, username: "OtherUser" },
+      entities: [{ type: "bot_command", offset: 0, length: "/auto".length }]
+    })
+  );
+
+  assert.equal(runnerFactory.runs.length, 0);
+  assert.equal(fakeBotApi.messages.at(-1).text, "Only manager users can run AnyAgent commands.");
 });
 
 test("runtime treats private topic messages as group-like conversations", async () => {
@@ -833,6 +908,7 @@ test("runtime routes /reset to the current chat session only", async () => {
   configStore.loadedBotConfig = {
     username: "relaybot",
     allowedUsernames: ["alloweduser"],
+    managerUsernames: ["alloweduser"],
     agent: {
       id: "primary-agent",
       cli: "claude",

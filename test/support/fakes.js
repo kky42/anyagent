@@ -170,7 +170,8 @@ export class FakeConfigStore {
           model: "default",
           reasoningEffort: "default"
         },
-        allowedUsernames: ["alloweduser"]
+        allowedUsernames: ["alloweduser"],
+        managerUsernames: ["alloweduser"]
       }
     );
   }

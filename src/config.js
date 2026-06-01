@@ -34,10 +34,22 @@ function assertArrayOfStrings(value, fieldPath) {
   }
 }
 
-function normalizeAllowedUsernames(value, fieldPath) {
+function hasOwnField(object, fieldName) {
+  return Object.prototype.hasOwnProperty.call(object ?? {}, fieldName);
+}
+
+function normalizeUsernameList(value, fieldPath) {
   const usernames = value ?? [];
   assertArrayOfStrings(usernames, fieldPath);
   return usernames.map(normalizeTelegramUsername).filter(Boolean);
+}
+
+function normalizeAllowedUsernames(value, fieldPath) {
+  return normalizeUsernameList(value, fieldPath);
+}
+
+function normalizeManagerUsernames(value, fieldPath) {
+  return normalizeUsernameList(value, fieldPath);
 }
 
 function normalizeTelegramBotUsername(value, fieldPath) {
@@ -238,6 +250,13 @@ async function normalizeAgentConfig({ agentId, filePath }) {
       telegram.allowedUsernames,
       `${filePath}.bindings.telegram.allowedUsernames`
     );
+    const hasDefaultManagerUsernames = hasOwnField(telegram, "managerUsernames");
+    const defaultManagerUsernames = hasDefaultManagerUsernames
+      ? normalizeManagerUsernames(
+          telegram.managerUsernames,
+          `${filePath}.bindings.telegram.managerUsernames`
+        )
+      : [];
     const bots = telegram.bots ?? [];
     if (!Array.isArray(bots)) {
       throw new Error(`${filePath}.bindings.telegram.bots must be an array`);
@@ -254,12 +273,22 @@ async function normalizeAgentConfig({ agentId, filePath }) {
         bot.allowedUsernames,
         `${prefix}.allowedUsernames`
       );
+      const hasBotManagerUsernames = hasOwnField(bot, "managerUsernames");
+      const managerUsernames = hasBotManagerUsernames
+        ? normalizeManagerUsernames(bot.managerUsernames, `${prefix}.managerUsernames`)
+        : [];
+      const mergedAllowedUsernames = [...new Set([...defaultAllowedUsernames, ...allowedUsernames])];
+      const mergedManagerUsernames =
+        hasDefaultManagerUsernames || hasBotManagerUsernames
+          ? [...new Set([...defaultManagerUsernames, ...managerUsernames])]
+          : [...mergedAllowedUsernames];
       const telegramBot = {
         platform: "telegram",
         bindingId: username,
         username,
         token: bot.token.trim(),
-        allowedUsernames: [...new Set([...defaultAllowedUsernames, ...allowedUsernames])],
+        allowedUsernames: [...new Set([...mergedAllowedUsernames, ...mergedManagerUsernames])],
+        managerUsernames: mergedManagerUsernames,
         agent: structuredClone(agent),
         configPath: filePath
       };
@@ -274,6 +303,13 @@ async function normalizeAgentConfig({ agentId, filePath }) {
       mattermost.allowedUsernames,
       `${filePath}.bindings.mattermost.allowedUsernames`
     );
+    const hasDefaultManagerUsernames = hasOwnField(mattermost, "managerUsernames");
+    const defaultManagerUsernames = hasDefaultManagerUsernames
+      ? normalizeManagerUsernames(
+          mattermost.managerUsernames,
+          `${filePath}.bindings.mattermost.managerUsernames`
+        )
+      : [];
     const bots = mattermost.bots ?? [];
     if (!Array.isArray(bots)) {
       throw new Error(`${filePath}.bindings.mattermost.bots must be an array`);
@@ -291,11 +327,20 @@ async function normalizeAgentConfig({ agentId, filePath }) {
         bot.allowedUsernames,
         `${prefix}.allowedUsernames`
       );
+      const hasBotManagerUsernames = hasOwnField(bot, "managerUsernames");
+      const managerUsernames = hasBotManagerUsernames
+        ? normalizeManagerUsernames(bot.managerUsernames, `${prefix}.managerUsernames`)
+        : [];
       const bindingId = normalizeMattermostBindingId({
         bindingId: bot.bindingId,
         serverUrl,
         username
       });
+      const mergedAllowedUsernames = [...new Set([...defaultAllowedUsernames, ...allowedUsernames])];
+      const mergedManagerUsernames =
+        hasDefaultManagerUsernames || hasBotManagerUsernames
+          ? [...new Set([...defaultManagerUsernames, ...managerUsernames])]
+          : [...mergedAllowedUsernames];
 
       const mattermostBot = {
         platform: "mattermost",
@@ -303,7 +348,8 @@ async function normalizeAgentConfig({ agentId, filePath }) {
         serverUrl,
         username,
         token: bot.token.trim(),
-        allowedUsernames: [...new Set([...defaultAllowedUsernames, ...allowedUsernames])],
+        allowedUsernames: [...new Set([...mergedAllowedUsernames, ...mergedManagerUsernames])],
+        managerUsernames: mergedManagerUsernames,
         agent: structuredClone(agent),
         configPath: filePath
       };

@@ -37,9 +37,11 @@ test("loadConfig loads agent profiles and telegram bindings", async () => {
           {
             username: "@RelayBot",
             token: "token-1",
-            allowedUsernames: ["@AllowedUser"]
+            allowedUsernames: ["@AllowedUser"],
+            managerUsernames: ["@ManagerUser"]
           }
-        ]
+        ],
+        managerUsernames: ["@OwnerManager"]
       }
     }
   });
@@ -56,7 +58,13 @@ test("loadConfig loads agent profiles and telegram bindings", async () => {
   assert.equal(config.telegramBots.length, 1);
   assert.equal(config.telegramBots[0].username, "relaybot");
   assert.equal(config.telegramBots[0].bindingId, "relaybot");
-  assert.deepEqual(config.telegramBots[0].allowedUsernames, ["owneruser", "alloweduser"]);
+  assert.deepEqual(config.telegramBots[0].managerUsernames, ["ownermanager", "manageruser"]);
+  assert.deepEqual(config.telegramBots[0].allowedUsernames, [
+    "owneruser",
+    "alloweduser",
+    "ownermanager",
+    "manageruser"
+  ]);
   assert.equal(config.telegramBots[0].agent.id, "primary");
   assert.equal(config.telegramBots[0].agent.workdir, workdir);
   assert.equal(config.chatBindings.length, 1);
@@ -89,9 +97,11 @@ test("loadConfig loads mattermost bindings", async () => {
             serverUrl: "http://localhost:8065/",
             username: "@RelayBot",
             token: "token-1",
-            allowedUsernames: ["@Allowed.User"]
+            allowedUsernames: ["@Allowed.User"],
+            managerUsernames: ["@Manager.User"]
           }
-        ]
+        ],
+        managerUsernames: ["@Owner.User"]
       }
     }
   });
@@ -103,7 +113,13 @@ test("loadConfig loads mattermost bindings", async () => {
   assert.equal(config.mattermostBots[0].serverUrl, "http://localhost:8065");
   assert.equal(config.mattermostBots[0].username, "relaybot");
   assert.equal(config.mattermostBots[0].bindingId, "localhost:8065:relaybot");
-  assert.deepEqual(config.mattermostBots[0].allowedUsernames, ["owneruser", "allowed.user"]);
+  assert.deepEqual(config.mattermostBots[0].managerUsernames, ["owner.user", "manager.user"]);
+  assert.deepEqual(config.mattermostBots[0].allowedUsernames, [
+    "owneruser",
+    "allowed.user",
+    "owner.user",
+    "manager.user"
+  ]);
   assert.equal(config.mattermostBots[0].agent.workdir, workdir);
   assert.equal(config.chatBindings[0], config.mattermostBots[0]);
 
@@ -200,6 +216,36 @@ test("loadConfig defaults profile values", async () => {
   assert.equal(config.agents[0].model, "default");
   assert.equal(config.agents[0].reasoningEffort, "default");
   assert.deepEqual(config.telegramBots[0].allowedUsernames, []);
+  assert.deepEqual(config.telegramBots[0].managerUsernames, []);
+});
+
+test("loadConfig treats allowed usernames as managers when manager usernames are omitted", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-config-"));
+  const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-workdir-"));
+
+  await writeAgentConfig(tempDir, "primary", {
+    profile: {
+      cli: "codex",
+      workdir
+    },
+    bindings: {
+      telegram: {
+        allowedUsernames: ["@OwnerUser"],
+        bots: [
+          {
+            username: "RelayBot",
+            token: "token-1",
+            allowedUsernames: ["@AllowedUser"]
+          }
+        ]
+      }
+    }
+  });
+
+  const config = await loadConfig(tempDir);
+
+  assert.deepEqual(config.telegramBots[0].allowedUsernames, ["owneruser", "alloweduser"]);
+  assert.deepEqual(config.telegramBots[0].managerUsernames, ["owneruser", "alloweduser"]);
 });
 
 test("loadConfig rejects missing workdir values", async () => {
