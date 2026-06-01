@@ -5,13 +5,18 @@ import {
   OUTBOUND_ATTACHMENT_SIZE_LIMIT_BYTES,
   outboundAttachmentLimitText
 } from "../common/attachments.js";
-import { splitPlainText, toErrorMessage } from "../../utils.js";
-import { parseOutputSegments } from "../common/output-attachments.js";
+import { sleep, splitPlainText, toErrorMessage } from "../../utils.js";
+import {
+  parseGroupMessageBodySegments,
+  parseGroupOutputSegments,
+  parseOutputSegments
+} from "../common/output-attachments.js";
 import { MattermostApiError } from "./mattermost-api.js";
 
 const MATTERMOST_RENDER_CHUNK_SIZE = 15000;
 const MATTERMOST_FILE_IDS_PER_POST = 5;
 const TYPING_INTERVAL_MS = 5000;
+const DELIVERY_RETRY_DELAYS_MS = [250, 1000];
 
 function getMattermostPostId(result) {
   const id = String(result?.id ?? "").trim();
@@ -80,6 +85,44 @@ function rootIdFromReplyTarget(replyTarget) {
   return rootId || null;
 }
 
+function retryableNetworkError(error) {
+  const message = toErrorMessage(error);
+  if (/fetch failed/i.test(message)) {
+    return true;
+  }
+
+  const code = error?.code ?? error?.cause?.code;
+  return [
+    "ECONNRESET",
+    "ECONNREFUSED",
+    "ETIMEDOUT",
+    "EAI_AGAIN",
+    "ENOTFOUND",
+    "UND_ERR_CONNECT_TIMEOUT",
+    "UND_ERR_SOCKET"
+  ].includes(String(code ?? ""));
+}
+
+async function retryDelivery(label, operation, logger) {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await operation();
+    } catch (error) {
+      const delayMs = DELIVERY_RETRY_DELAYS_MS[attempt];
+      if (delayMs === undefined || !retryableNetworkError(error)) {
+        throw error;
+      }
+
+      attempt += 1;
+      logger(
+        `${label} failed: ${toErrorMessage(error)}; retrying (${attempt}/${DELIVERY_RETRY_DELAYS_MS.length})`
+      );
+      await sleep(delayMs);
+    }
+  }
+}
+
 export class MessageRenderer {
   constructor({ botApi, channelId, websocket = null, logger = () => {} }) {
     this.botApi = botApi;
@@ -117,18 +160,26 @@ export class MessageRenderer {
   }
 
   async sendMessageChunk(rawChunk, options = {}) {
-    return this.botApi.createPost({
-      channelId: this.channelId,
-      message: rawChunk,
-      rootId: rootIdFromReplyTarget(options.replyTarget)
-    });
+    return retryDelivery(
+      "post create",
+      () => this.botApi.createPost({
+        channelId: this.channelId,
+        message: rawChunk,
+        rootId: rootIdFromReplyTarget(options.replyTarget)
+      }),
+      this.logger
+    );
   }
 
   async editMessageChunk(postId, rawChunk) {
-    return this.botApi.updatePost({
-      postId,
-      message: rawChunk
-    });
+    return retryDelivery(
+      "post update",
+      () => this.botApi.updatePost({
+        postId,
+        message: rawChunk
+      }),
+      this.logger
+    );
   }
 
   async sendSplitText(rawText, options = {}) {
@@ -262,6 +313,8 @@ export class MessageRenderer {
 
   async renderOutputSegments(segments, options = {}) {
     const deliverText = options.deliverText ?? ((text) => this.sendText(text, options));
+    const suppressRawText = Boolean(options.suppressRawText);
+    const deliverGroupMessages = Boolean(options.deliverGroupMessages);
     let hasVisibleOutput = false;
     let pendingFileIds = [];
 
@@ -283,26 +336,20 @@ export class MessageRenderer {
       hasVisibleOutput = true;
     };
 
-    for (const segment of segments) {
-      if (segment.kind === "text") {
-        await flushFiles();
-        if (!hasVisibleText(segment.text)) {
-          continue;
-        }
-        await deliverText(segment.text);
-        hasVisibleOutput = true;
-        continue;
+    const renderVisibleText = async (text) => {
+      await flushFiles();
+      if (!hasVisibleText(text)) {
+        return;
       }
+      await deliverText(text);
+      hasVisibleOutput = true;
+    };
 
+    const renderAttachmentSegment = async (segment) => {
       for (const entry of segment.entries) {
         const result = await this.uploadAttachmentEntry(entry, options);
         if (result.kind === "text") {
-          await flushFiles();
-          if (!hasVisibleText(result.text)) {
-            continue;
-          }
-          await deliverText(result.text);
-          hasVisibleOutput = true;
+          await renderVisibleText(result.text);
           continue;
         }
 
@@ -311,6 +358,40 @@ export class MessageRenderer {
           await flushFiles();
         }
       }
+    };
+
+    for (const segment of segments) {
+      if (segment.kind === "text") {
+        if (suppressRawText) {
+          continue;
+        }
+        await renderVisibleText(segment.text);
+        continue;
+      }
+
+      if (segment.kind === "group_message") {
+        const text = deliverGroupMessages ? segment.text : segment.rawText;
+        if (suppressRawText && !deliverGroupMessages) {
+          continue;
+        }
+
+        if (!deliverGroupMessages) {
+          await renderVisibleText(text);
+          continue;
+        }
+
+        const bodySegments = parseGroupMessageBodySegments(text);
+        for (const bodySegment of bodySegments) {
+          if (bodySegment.kind === "attachment") {
+            await renderAttachmentSegment(bodySegment);
+            continue;
+          }
+          await renderVisibleText(bodySegment.text);
+        }
+        continue;
+      }
+
+      await renderAttachmentSegment(segment);
     }
 
     await flushFiles();
@@ -326,6 +407,16 @@ export class MessageRenderer {
     await this.renderOutputSegments(segments, {
       ...options,
       clearProgressAfterFirstAttachment: true,
+      deliverText: (rawText) => this.renderTerminalText(rawText, options)
+    });
+  }
+
+  async renderGroupFinalMessage(text, options = {}) {
+    const segments = parseGroupOutputSegments(String(text ?? ""));
+    await this.renderOutputSegments(segments, {
+      ...options,
+      suppressRawText: true,
+      deliverGroupMessages: true,
       deliverText: (rawText) => this.renderTerminalText(rawText, options)
     });
   }

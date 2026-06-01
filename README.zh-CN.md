@@ -14,9 +14,9 @@ AnyAgent in Telegram
 ## 为什么选 AnyAgent
 
 - 直接复用你本地已经配好的 CLI agent 和配置，在 Telegram 或 Mattermost 聊天里继续用，无需迁移。
-- 支持 streaming events 实时输出，agent 当前状态随时可见。
+- direct chat 里支持实时进度输出，agent 运行时也会显示 typing 状态。
 - 完整的聊天命令，让聊天里的体验接近本地 CLI。
-- 只注入 7 行附件协议，低侵入，尽量保留原生 agent 的行为和性能。
+- 使用很小的 XML 输出协议控制文件和群聊可见消息，relay 行为清晰、容易检查。
 
 ## 快速开始
 
@@ -71,10 +71,6 @@ anyagent
   "bindings": {
     "telegram": {
       "allowedUsernames": ["your-telegram-username"],
-      "groupHistory": {
-        "hours": 24,
-        "messages": 1000
-      },
       "bots": [
         {
           "username": "your_bot_username",
@@ -84,10 +80,6 @@ anyagent
     },
     "mattermost": {
       "allowedUsernames": ["your-mattermost-username"],
-      "groupHistory": {
-        "hours": 24,
-        "messages": 1000
-      },
       "bots": [
         {
           "serverUrl": "https://mattermost.example.com",
@@ -109,34 +101,48 @@ anyagent
 | `profile.auto` | agent 执行动作时的权限等级：`low`、`medium` 或 `high`。 |
 | `profile.model` | 可选的模型覆盖配置。使用 `default` 表示沿用 CLI 默认值。 |
 | `profile.reasoningEffort` | 可选的 reasoning 覆盖配置。使用 `default` 表示沿用 CLI 默认值。 |
-| `allowedUsernames` | 允许使用这个 bot 的聊天平台 username。 |
-| `groupHistory.hours` | 群聊上下文的小时窗口。默认 `24`。 |
-| `groupHistory.messages` | 群聊上下文的已观察消息数量窗口。默认 `1000`。 |
+| `allowedUsernames` | direct/private chat 里允许使用这个 bot 的聊天平台 username。group-like chat 暂时忽略这个列表。 |
 | `bots[].token` | BotFather 提供的 Telegram bot token。 |
 | `mattermost.bots[].serverUrl` | Mattermost server 的基础 URL。 |
 | `mattermost.bots[].token` | Mattermost bot access token。 |
-
-`groupHistory` 整个配置块是可选的。如果省略，AnyAgent 会使用上面列出的默认值。
 
 如果你不知道自己的 Telegram username，先给 bot 发送任意消息。未授权回复里会显示需要加入配置的标准化 username。
 
 ## Telegram 群聊
 
-在群聊里，AnyAgent 只会在消息明确提到 bot 时运行，例如 `@your_bot_username summarize this`。
+在 group 和 supergroup 里，只要聊天平台把非命令消息投递给 bot，AnyAgent 就会触发 agent，或把这条消息合并进下一次等待处理的 agent turn。agent 正在运行时收到多条未处理群消息，AnyAgent 会按投递顺序把它们合并成一段 plain-text transcript，包含时间、显示名、handle、消息正文，以及紧贴对应消息的已下载附件。
 
-触发后，agent 会收到已观察到的群聊上下文和当前触发消息。上下文受 `groupHistory.hours`、`groupHistory.messages` 和上一次触发边界限制，所以已经发给 agent 的消息不会在下一次触发时重复发送。历史上下文里的附件只显示元信息。relay 只会下载触发消息和它回复的消息里的附件。
+`/status@your_bot_username` 这类 relay command 仍然由 relay 处理，不会发送给 agent。Telegram forum topic 使用独立 agent session。普通 group reply 不会创建独立 session。
 
-Telegram Bot API 不能读取任意历史群聊消息。daemon 重启后，AnyAgent 的已观察群聊历史会从空开始。如果 bot 开启了 Telegram Privacy Mode，Telegram 可能只投递命令、提及 bot 的消息和对 bot 的回复；如果需要更完整的观察上下文，需要关闭 Privacy Mode 或把 bot 设为管理员。
+Telegram Bot API 不能读取任意历史群聊消息。daemon 重启后，AnyAgent 会启动新的 session，只能看到启动后被投递给 bot 的消息。如果 bot 开启了 Telegram Privacy Mode，Telegram 可能只投递命令、提及 bot 的消息和对 bot 的回复；如果需要每条群消息都触发 agent，需要关闭 Privacy Mode 或把 bot 设为管理员。
 Telegram bot 也收不到其他 bot 发出的消息，所以同一个群里的一个 bot 不会因为另一个 bot 的发言而触发。
 
 ## Mattermost 聊天
 
-在 direct message 里，每个 Mattermost channel 对应一个 agent session。在普通 channel 和 group message 里，每个 channel 也对应一个 session，只有明确提到 bot 的消息才会触发 agent。
+在 direct message 里，每个 Mattermost direct channel 对应一个 agent session。在普通 channel 和 group message 里，每个非命令 post 都会触发 agent，或合并进下一次等待处理的 agent turn。
 
-Mattermost thread reply 不会创建独立 session。relay 会继续使用 channel session，并通过 `root_id` 把 agent 回复发回对应 thread。
+Mattermost channel post、group message 和 thread 都属于 group-like chat。Mattermost thread 会按 thread root 创建独立 agent session。thread 的第一次 turn 会把 thread root 当作普通 transcript message 放在新消息前面。
 
 Mattermost 输出使用原生 Markdown 渲染，包括表格和 fenced code block。relay 会用 Mattermost post edit 显示 transient progress，并用 WebSocket typing indicator 表示运行中。
-和 Telegram 不同，Mattermost bot account 可以收到同一 channel 或 thread 里其他 bot 发出的 post。AnyAgent 仍会忽略自己发出的 bot post；但如果多个 AnyAgent bot 共享一个 channel，一个 bot 可以在上下文里看到另一个 bot 的回复，并且在被明确提及时可能被其他 bot 的消息触发。
+和 Telegram 不同，Mattermost bot account 可以收到同一 channel 或 thread 里其他 bot 发出的 post。AnyAgent 仍会忽略自己发出的 bot post；但其他 bot 的 post 可能出现在 transcript 中，也可能触发 agent。
+
+## Agent 输出协议
+
+在 direct/private chat 里，agent 的普通文本会直接发送到聊天里。任何聊天类型里如果要发送本地文件，agent 使用每个文件一个 XML block：
+
+```xml
+<attachment path="./artifacts/chart.png" kind="photo" />
+```
+
+在 group-like chat 里，agent 的 raw text 不会发送到群里。可见群消息必须放在 group-message block 里：
+
+```xml
+<group_message><![CDATA[
+Message to the group.
+]]></group_message>
+```
+
+relay 会按 final agent output 里的出现顺序发送可见群消息和附件。中间事件不会发送到 group-like chat。
 
 ## 聊天命令
 
@@ -200,7 +206,7 @@ pm2 save
 ## 说明和限制
 
 - relay 启动时会丢弃停止期间收到的消息。
-- 支持 Telegram 和 Mattermost 聊天。群聊或 channel 消息必须提到 bot 才会触发运行。
+- 支持 Telegram 和 Mattermost 聊天。群聊或 channel 消息在聊天平台投递给 bot 时会触发运行。
 - Telegram 支持的附件类型：照片、文档、视频、音频、语音消息和动画。Mattermost 支持文件附件。
 - 超过 20 MB 的附件会被拒绝。
 - 通过 slash command 修改的配置只影响当前 chat session。

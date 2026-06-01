@@ -14,9 +14,9 @@ AnyAgent in Telegram
 ## Why AnyAgent
 
 - Keep using the CLI agent you already set up locally, in Telegram or Mattermost chats, with the same config and no migration.
-- See live streaming events, so the agent's current state stays visible while it works.
+- See live progress in direct chats and typing indicators while the agent works.
 - Use a full set of chat commands for a flow that feels close to the local CLI.
-- Add only a 7-line attachment contract to the prompt, keeping the relay non-invasive and close to native agent behavior.
+- Use a small XML output contract for files and group-visible messages, keeping the relay explicit and inspectable.
 
 ## Quick Start
 
@@ -71,10 +71,6 @@ A fuller config example looks like this:
   "bindings": {
     "telegram": {
       "allowedUsernames": ["your-telegram-username"],
-      "groupHistory": {
-        "hours": 24,
-        "messages": 1000
-      },
       "bots": [
         {
           "username": "your_bot_username",
@@ -84,10 +80,6 @@ A fuller config example looks like this:
     },
     "mattermost": {
       "allowedUsernames": ["your-mattermost-username"],
-      "groupHistory": {
-        "hours": 24,
-        "messages": 1000
-      },
       "bots": [
         {
           "serverUrl": "https://mattermost.example.com",
@@ -109,34 +101,48 @@ Important fields:
 | `profile.auto` | Permission level for agent actions: `low`, `medium`, or `high`. |
 | `profile.model` | Optional model override. Use `default` to keep the CLI default. |
 | `profile.reasoningEffort` | Optional reasoning override. Use `default` to keep the CLI default. |
-| `allowedUsernames` | Chat usernames allowed to use this bot. |
-| `groupHistory.hours` | Group-chat context window in hours. Defaults to `24`. |
-| `groupHistory.messages` | Group-chat context window in observed messages. Defaults to `1000`. |
+| `allowedUsernames` | Chat usernames allowed to use this bot in direct/private chats. Group-like chats currently ignore this list. |
 | `bots[].token` | Telegram bot token from BotFather. |
 | `mattermost.bots[].serverUrl` | Base URL for the Mattermost server. |
 | `mattermost.bots[].token` | Mattermost bot access token. |
-
-The `groupHistory` block is optional. If it is omitted, AnyAgent uses the defaults shown above.
 
 If you do not know your Telegram username, send the bot any message once. The unauthorized reply shows the normalized username to add.
 
 ## Telegram Group Chats
 
-In group chats, AnyAgent only runs when a message explicitly mentions the bot, for example `@your_bot_username summarize this`.
+In group chats and supergroups, every non-command message delivered to the bot triggers the agent or joins the next pending agent turn. If multiple unprocessed group messages arrive while the agent is running, AnyAgent sends them to the agent as one plain-text transcript in delivery order, including timestamp, display name, handle, message text, and downloaded attachments next to the message that carried them.
 
-When triggered, the agent receives observed group context plus the triggering message. Context is limited by `groupHistory.hours`, `groupHistory.messages`, and the previous trigger boundary, so messages already sent to the agent are not resent on the next trigger. Attachments from historical context are shown as metadata only. The relay downloads attachments only from the triggering message and the message it replies to.
+Relay commands such as `/status@your_bot_username` stay relay commands and are not sent to the agent. Telegram forum topics use separate agent sessions. Ordinary replies inside a group do not create separate sessions.
 
-Telegram bots cannot fetch arbitrary past group history through the Bot API. After a daemon restart, AnyAgent starts with an empty observed group history. If the bot runs with Telegram Privacy Mode enabled, Telegram may only deliver commands, mentions, and replies to the bot; disable Privacy Mode or make the bot an admin if you need broader observed context.
+Telegram bots cannot fetch arbitrary past group history through the Bot API. After a daemon restart, AnyAgent starts fresh sessions and only sees messages delivered after startup. If the bot runs with Telegram Privacy Mode enabled, Telegram may only deliver commands, mentions, and replies to the bot; disable Privacy Mode or make the bot an admin if you need every group message to trigger the agent.
 Telegram bots also do not receive messages from other bots, so one bot in a group will not react to another bot's posts.
 
 ## Mattermost Chats
 
-In direct messages, each Mattermost channel maps to one agent session. In channels and group messages, each channel also maps to one session, and the relay only runs when the bot is mentioned.
+In direct messages, each Mattermost direct channel maps to one agent session. In channels and group messages, every non-command post triggers the agent or joins the next pending agent turn.
 
-Mattermost thread replies do not create separate agent sessions. The relay keeps the channel session and sends the agent response back to the triggering thread with `root_id`.
+Mattermost channel posts, group messages, and threads are group-like chats. A Mattermost thread gets its own agent session keyed by the thread root. The first turn in a thread includes the thread root as a normal transcript message before the new message.
 
 Mattermost renders the agent output as native Markdown, including tables and fenced code blocks. The relay uses Mattermost post edits for transient progress and WebSocket typing indicators for active runs.
-Unlike Telegram, Mattermost bot accounts can receive posts from other bots in the same channel or thread. AnyAgent still ignores its own bot posts, but if multiple AnyAgent bots share a channel, a bot can see another bot's reply and may react to it if it is explicitly addressed.
+Unlike Telegram, Mattermost bot accounts can receive posts from other bots in the same channel or thread. AnyAgent still ignores its own bot posts, but another bot's post can appear in the transcript and can trigger the agent.
+
+## Agent Output Contract
+
+In direct/private chats, normal agent text is sent to the chat. To send a local file in any chat type, the agent uses one XML block per file:
+
+```xml
+<attachment path="./artifacts/chart.png" kind="photo" />
+```
+
+In group-like chats, raw agent text is not sent to the group. Visible group replies must be inside a group-message block:
+
+```xml
+<group_message><![CDATA[
+Message to the group.
+]]></group_message>
+```
+
+The relay sends visible group messages and attachments in the order they appear in the final agent output. Intermediate agent events are not sent to group-like chats.
 
 ## Chat Commands
 
@@ -200,7 +206,7 @@ pm2 save
 ## Notes And Limits
 
 - Messages sent while the relay is stopped are discarded on startup.
-- Telegram and Mattermost chats are supported. Group/channel messages must mention the bot to trigger a run.
+- Telegram and Mattermost chats are supported. Group/channel messages trigger when the chat platform delivers them to the bot.
 - Supported Telegram attachments: photos, documents, videos, audio, voice messages, and animations. Mattermost file attachments are supported as files.
 - Attachments larger than 20 MB are rejected.
 - Chat-specific command changes only affect that chat session.

@@ -15,7 +15,11 @@ import {
   toErrorMessage
 } from "../../utils.js";
 import { buildCacheScope } from "./cache-scope.js";
-import { ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS } from "./output-instructions.js";
+import { buildGroupInputMessage, mergeGroupTurns } from "./group-turn.js";
+import {
+  buildGroupOutputDeveloperInstructions,
+  PRIVATE_OUTPUT_DEVELOPER_INSTRUCTIONS
+} from "./output-instructions.js";
 import { renderStatusMessage } from "./render.js";
 import { NOOP_CONFIG_STORE, SessionPersistence } from "./session-persistence.js";
 import { prepareForSessionReset, resetSession } from "./session-reset.js";
@@ -56,6 +60,7 @@ export class ChatSession {
     this.isRunning = false;
     this.activeRun = null;
     this.activeReplyTarget = null;
+    this.groupRootIncluded = false;
     this.usesDefaultRunFactory = !createAgentRun && !createCodexRun;
     this.createAgentRun =
       createAgentRun ?? createCodexRun ?? ((params) => this.cliAdapter.startRun(params));
@@ -154,6 +159,13 @@ export class ChatSession {
     });
   }
 
+  renderGroupFinalMessage(text, options = {}) {
+    return this.output.renderGroupFinalMessage(text, {
+      ...options,
+      workdir: this.workdir
+    });
+  }
+
   renderErrorText(text, options = {}) {
     return this.output.renderErrorText(text, options);
   }
@@ -198,20 +210,44 @@ export class ChatSession {
   normalizeTurn(turn) {
     if (typeof turn === "string") {
       const promptText = String(turn).trim();
-      return promptText ? { promptText, attachments: [], replyTarget: null } : null;
+      return promptText ? { mode: "private", promptText, attachments: [], replyTarget: null } : null;
     }
 
-    const promptText = String(turn?.promptText ?? "").trim();
+    const mode = turn?.mode === "group" ? "group" : "private";
+    const groupInput = turn?.groupInput && typeof turn.groupInput === "object"
+      ? {
+          includesRoot: Boolean(turn.groupInput.includesRoot),
+          messages: Array.isArray(turn.groupInput.messages)
+            ? turn.groupInput.messages.filter(Boolean)
+            : []
+        }
+      : null;
+    const promptText = String(
+      turn?.promptText ?? (groupInput ? buildGroupInputMessage(groupInput) : "")
+    ).trim();
     const attachments = Array.isArray(turn?.attachments) ? turn.attachments.filter(Boolean) : [];
     if (!promptText && attachments.length === 0) {
       return null;
     }
 
     return {
+      mode,
       promptText,
       attachments,
-      replyTarget: turn?.replyTarget ?? null
+      replyTarget: turn?.replyTarget ?? null,
+      groupInput,
+      mergeKey: turn?.mergeKey ?? null,
+      groupIdentity: turn?.groupIdentity ?? null,
+      developerInstructions: turn?.developerInstructions ?? null
     };
+  }
+
+  shouldIncludeGroupRoot() {
+    if (this.groupRootIncluded) {
+      return false;
+    }
+    this.groupRootIncluded = true;
+    return true;
   }
 
   async clearCache() {
@@ -518,8 +554,25 @@ export class ChatSession {
       return;
     }
 
+    if (normalizedTurn.mode === "group") {
+      const lastQueuedTurn = this.queue.at(-1);
+      if (
+        lastQueuedTurn?.mode === "group" &&
+        lastQueuedTurn.mergeKey === normalizedTurn.mergeKey
+      ) {
+        mergeGroupTurns(lastQueuedTurn, normalizedTurn);
+        if (!this.isRunning) {
+          void this.drainQueue();
+        }
+        return;
+      }
+    }
+
     if (this.isRunning) {
       this.queue.push(normalizedTurn);
+      if (normalizedTurn.mode === "group") {
+        return;
+      }
       await this.sendText(`Queued message ${this.queue.length}.`, {
         replyTarget: normalizedTurn.replyTarget
       });
@@ -558,14 +611,21 @@ export class ChatSession {
     let completedTurn = false;
     const runCli = this.cli;
     const runCliAdapter = this.cliAdapter;
-    const message = buildTurnInputMessage(nextTurn);
+    const isGroupTurn = nextTurn.mode === "group";
+    const message = nextTurn.groupInput
+      ? buildGroupInputMessage(nextTurn.groupInput)
+      : buildTurnInputMessage(nextTurn);
+    const developerInstructions = nextTurn.developerInstructions ??
+      (isGroupTurn
+        ? buildGroupOutputDeveloperInstructions(nextTurn.groupIdentity ?? {})
+        : PRIVATE_OUTPUT_DEVELOPER_INSTRUCTIONS);
     const buildArgParams = {
       sessionId: this.sessionId,
       message,
       autoMode: this.auto,
       model: this.model,
       reasoningEffort: this.reasoningEffort,
-      developerInstructions: ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS
+      developerInstructions
     };
     const runParams = {
       cli: runCli,
@@ -607,16 +667,41 @@ export class ChatSession {
             continue;
           }
           if (action.kind === "progress") {
+            if (isGroupTurn) {
+              this.logger(`${runCliAdapter.id} progress: ${action.text}`);
+              continue;
+            }
             await this.renderProgressText(action.text, { replyTarget: nextTurn.replyTarget });
             continue;
           }
           if (action.kind === "error") {
             emittedError = true;
+            if (isGroupTurn) {
+              this.logger(`${runCliAdapter.id} error: ${action.text}`);
+              continue;
+            }
             await this.renderErrorText(action.text, { replyTarget: nextTurn.replyTarget });
             continue;
           }
           if (action.kind === "message") {
-            await this.renderFinalMessage(action.text, { replyTarget: nextTurn.replyTarget });
+            try {
+              if (isGroupTurn) {
+                await this.renderGroupFinalMessage(action.text, {
+                  replyTarget: nextTurn.replyTarget
+                });
+              } else {
+                await this.renderFinalMessage(action.text, { replyTarget: nextTurn.replyTarget });
+              }
+            } catch (error) {
+              emittedError = true;
+              if (isGroupTurn) {
+                this.logger(
+                  `${runCliAdapter.id} group output delivery failed: ${toErrorMessage(error)}`
+                );
+                continue;
+              }
+              throw error;
+            }
           }
         }
       },
@@ -645,6 +730,10 @@ export class ChatSession {
         await this.clearProgressMessage();
       }
       if (!result.sawTerminalEvent && !emittedError) {
+        if (isGroupTurn) {
+          this.logger(`${runCliAdapter.displayName} exited without a terminal JSON event.`);
+          return;
+        }
         await this.renderErrorText(
           `${runCliAdapter.displayName} exited without a terminal JSON event.`,
           {
@@ -653,6 +742,10 @@ export class ChatSession {
         );
       }
     } catch (error) {
+      if (isGroupTurn) {
+        this.logger(`${runCliAdapter.displayName} process error: ${toErrorMessage(error)}`);
+        return;
+      }
       await this.renderErrorText(`${runCliAdapter.displayName} process error: ${toErrorMessage(error)}`, {
         replyTarget: nextTurn.replyTarget
       });

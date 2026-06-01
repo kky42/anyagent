@@ -13,10 +13,6 @@ import {
   normalizeAgentId,
   normalizeTelegramUsername
 } from "./utils.js";
-import {
-  DEFAULT_GROUP_HISTORY_HOURS,
-  DEFAULT_GROUP_HISTORY_MESSAGES
-} from "./chat_adapter/common/group-history-defaults.js";
 
 const SUPPORTED_AGENT_CLI_SET = new Set(SUPPORTED_AGENT_CLIS);
 
@@ -89,38 +85,6 @@ function normalizeMattermostBindingId({ bindingId, serverUrl, username }) {
   }
   const host = new URL(serverUrl).host.toLowerCase();
   return `${host}:${username}`;
-}
-
-function normalizePositiveInteger(value, fieldPath, defaultValue) {
-  if (value === undefined) {
-    return defaultValue;
-  }
-
-  const normalized = Number(value);
-  if (!Number.isSafeInteger(normalized) || normalized < 1) {
-    throw new Error(`${fieldPath} must be a positive integer`);
-  }
-
-  return normalized;
-}
-
-function normalizeGroupHistory(value, fieldPath) {
-  if (value === undefined) {
-    return {
-      hours: DEFAULT_GROUP_HISTORY_HOURS,
-      messages: DEFAULT_GROUP_HISTORY_MESSAGES
-    };
-  }
-
-  assertObject(value, fieldPath);
-  return {
-    hours: normalizePositiveInteger(value.hours, `${fieldPath}.hours`, DEFAULT_GROUP_HISTORY_HOURS),
-    messages: normalizePositiveInteger(
-      value.messages,
-      `${fieldPath}.messages`,
-      DEFAULT_GROUP_HISTORY_MESSAGES
-    )
-  };
 }
 
 async function pathExists(filePath) {
@@ -290,20 +254,12 @@ async function normalizeAgentConfig({ agentId, filePath }) {
         bot.allowedUsernames,
         `${prefix}.allowedUsernames`
       );
-      const groupHistory = normalizeGroupHistory(
-        bot.groupHistory ?? telegram.groupHistory,
-        bot.groupHistory === undefined
-          ? `${filePath}.bindings.telegram.groupHistory`
-          : `${prefix}.groupHistory`
-      );
-
       const telegramBot = {
         platform: "telegram",
         bindingId: username,
         username,
         token: bot.token.trim(),
         allowedUsernames: [...new Set([...defaultAllowedUsernames, ...allowedUsernames])],
-        groupHistory,
         agent: structuredClone(agent),
         configPath: filePath
       };
@@ -335,12 +291,6 @@ async function normalizeAgentConfig({ agentId, filePath }) {
         bot.allowedUsernames,
         `${prefix}.allowedUsernames`
       );
-      const groupHistory = normalizeGroupHistory(
-        bot.groupHistory ?? mattermost.groupHistory,
-        bot.groupHistory === undefined
-          ? `${filePath}.bindings.mattermost.groupHistory`
-          : `${prefix}.groupHistory`
-      );
       const bindingId = normalizeMattermostBindingId({
         bindingId: bot.bindingId,
         serverUrl,
@@ -354,7 +304,6 @@ async function normalizeAgentConfig({ agentId, filePath }) {
         username,
         token: bot.token.trim(),
         allowedUsernames: [...new Set([...defaultAllowedUsernames, ...allowedUsernames])],
-        groupHistory,
         agent: structuredClone(agent),
         configPath: filePath
       };

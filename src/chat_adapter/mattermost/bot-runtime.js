@@ -2,13 +2,7 @@ import { DEFAULT_CACHE_PATH, sleep, toErrorMessage } from "../../utils.js";
 import { NOOP_CONFIG_STORE } from "../common/session-persistence.js";
 import { ChatSession, replyTargetFromMattermostPost } from "./chat-session.js";
 import { MattermostApi, postFromWebSocketEvent } from "./mattermost-api.js";
-import {
-  buildGroupPrompt,
-  DEFAULT_GROUP_HISTORY_HOURS,
-  DEFAULT_GROUP_HISTORY_MESSAGES,
-  GroupHistory,
-  isBotAddressed
-} from "./group-history.js";
+import { mattermostUserDisplayName, renderGroupInputPost } from "./group-input.js";
 import { hasSupportedAttachment } from "./attachments.js";
 import { parseCommand, routeTextMessage } from "./command-router.js";
 import { CHAT_COMMANDS, ROUTED_COMMAND_NAMES } from "../common/render.js";
@@ -41,7 +35,11 @@ function normalizedPostText(post) {
 
 function channelLikeConversationId(post) {
   const channelId = String(post?.channel_id ?? "").trim();
-  return channelId || null;
+  if (!channelId) {
+    return null;
+  }
+  const rootId = String(post?.root_id ?? "").trim();
+  return rootId ? `${channelId}:thread:${rootId}` : channelId;
 }
 
 export class BotRuntime {
@@ -54,8 +52,6 @@ export class BotRuntime {
     createAgentRun = null,
     createCodexRun = null,
     cacheRootDir = DEFAULT_CACHE_PATH,
-    groupHistoryHours = DEFAULT_GROUP_HISTORY_HOURS,
-    groupHistoryMessages = DEFAULT_GROUP_HISTORY_MESSAGES,
     watchdogIntervalMs = DEFAULT_WATCHDOG_INTERVAL_MS,
     staleWebSocketMs = DEFAULT_STALE_WEBSOCKET_MS
   }) {
@@ -72,15 +68,13 @@ export class BotRuntime {
     this.cacheRootDir = cacheRootDir;
     this.botUsername = null;
     this.botUserId = null;
+    this.botDisplayName = "AnyAgent";
     this.websocket = null;
     this.connected = false;
     this.running = false;
     this.sessions = new Map();
-    this.groupHistories = new Map();
     this.channels = new Map();
     this.users = new Map();
-    this.groupHistoryHours = groupHistoryHours;
-    this.groupHistoryMessages = groupHistoryMessages;
     this.reconnectDelayMs = DEFAULT_RECONNECT_DELAY_MS;
     this.watchdogIntervalMs = watchdogIntervalMs;
     this.staleWebSocketMs = staleWebSocketMs;
@@ -119,19 +113,6 @@ export class BotRuntime {
       this.sessions.set(key, session);
     }
     return session;
-  }
-
-  groupHistoryFor(conversationId) {
-    const key = String(conversationId);
-    let history = this.groupHistories.get(key);
-    if (!history) {
-      history = new GroupHistory({
-        maxHours: this.groupHistoryHours,
-        maxMessages: this.groupHistoryMessages
-      });
-      this.groupHistories.set(key, history);
-    }
-    return history;
   }
 
   async channelFor(channelId) {
@@ -199,12 +180,21 @@ export class BotRuntime {
     const me = await this.botApi.getMe();
     this.botUsername = String(me.username ?? "").trim().toLowerCase();
     this.botUserId = String(me.id ?? "").trim();
+    this.botDisplayName = mattermostUserDisplayName(me, "AnyAgent");
     if (this.botConfig.username && this.botUsername !== this.botConfig.username) {
       throw new Error(
         `Configured Mattermost bot username @${this.botConfig.username} does not match token owner @${this.botUsername || "unknown"}.`
       );
     }
     this.log(`ready as @${this.botUsername} for agent ${this.botConfig.agent.id} with workdir ${this.botConfig.agent.workdir}`);
+  }
+
+  groupIdentity() {
+    const botUsername = this.botUsername || this.botConfig.username;
+    return {
+      botName: this.botDisplayName,
+      botHandle: botUsername ? `@${botUsername}` : "@unknown"
+    };
   }
 
   async sendDirectMessage(channelId, text) {
@@ -242,24 +232,23 @@ export class BotRuntime {
     }
     post = await this.enrichPost(post);
 
-    const channelId = channelLikeConversationId(post);
-    if (!channelId) {
+    const platformChannelId = String(post?.channel_id ?? "").trim();
+    if (!platformChannelId) {
       return;
     }
 
-    const channel = await this.channelFor(channelId);
+    const channel = await this.channelFor(platformChannelId);
     const isDirect = this.isDirectChannel(channel);
-    const session = this.sessionFor(channelId, { conversationId: channelId });
-    const history = this.groupHistoryFor(channelId);
-    const addressed = isDirect || isBotAddressed(post, this.botUsername);
-    history.remember(post);
+    const conversationId = isDirect ? platformChannelId : channelLikeConversationId(post);
+    if (!conversationId) {
+      return;
+    }
+    const session = this.sessionFor(platformChannelId, { conversationId });
 
-    if (!this.isAuthorized({ username: post?.user?.username ?? post?.username })) {
-      if (isDirect) {
-        await session.sendText(unauthorizedMessage(post?.user), {
-          replyTarget: replyTargetFromMattermostPost(post)
-        });
-      }
+    if (isDirect && !this.isAuthorized({ username: post?.user?.username ?? post?.username })) {
+      await session.sendText(unauthorizedMessage(post?.user), {
+        replyTarget: replyTargetFromMattermostPost(post)
+      });
       return;
     }
 
@@ -268,17 +257,12 @@ export class BotRuntime {
       return;
     }
 
-    if (!addressed && hasSupportedAttachment(post)) {
-      return;
-    }
-
-    if (!addressed) {
-      return;
-    }
-
     const text = normalizedPostText(post);
     const parsedCommand = parseCommand(text, this.botUsername);
     if (isDirect || ROUTED_GROUP_COMMANDS.has(parsedCommand?.command)) {
+      if (!isDirect && !this.isAuthorized({ username: post?.user?.username ?? post?.username })) {
+        return;
+      }
       await routeTextMessage({
         text,
         botUsername: this.botUsername,
@@ -289,39 +273,41 @@ export class BotRuntime {
       return;
     }
 
-    if (hasSupportedAttachment(post)) {
-      await this.handleGroupTriggerPost({ session, history, post });
+    await this.handleGroupTriggerPost({ session, post });
+  }
+
+  async handleGroupTriggerPost({ session, post }) {
+    if (!normalizedPostText(post).trim() && !hasSupportedAttachment(post)) {
       return;
     }
 
-    await this.handleGroupTriggerPost({ session, history, post });
-  }
-
-  async handleGroupTriggerPost({ session, history, post }) {
     const referencePost = post.root_id
       ? await this.botApi.getPost(post.root_id).then((rootPost) => this.enrichPost(rootPost)).catch(() => null)
       : null;
-    const attachmentPosts = [post, ...(referencePost ? [referencePost] : [])];
-    try {
-      const contextMessages = history.contextBefore(post);
-      const promptText = buildGroupPrompt({
-        contextMessages,
-        triggerMessage: post,
-        attachmentMessages: [post],
-        referenceMessage: referencePost
-      });
-      const attachments = await session.stageAttachmentsFromPosts(attachmentPosts);
-      history.markTriggered(post);
-      await session.enqueueTurn({
-        promptText,
-        attachments,
-        replyTarget: replyTargetFromMattermostPost(post)
-      });
-    } catch (error) {
-      await session.sendText(toErrorMessage(error), {
-        replyTarget: replyTargetFromMattermostPost(post)
-      });
+    const posts = [];
+    let includesRoot = false;
+    if (referencePost && session.shouldIncludeGroupRoot()) {
+      posts.push(referencePost);
+      includesRoot = true;
     }
+    posts.push(post);
+
+    const renderedMessages = [];
+    for (const candidate of posts) {
+      const attachments = await session.stageInputAttachmentsFromPost(candidate);
+      renderedMessages.push(renderGroupInputPost(candidate, attachments));
+    }
+
+    await session.enqueueTurn({
+      mode: "group",
+      groupInput: {
+        includesRoot,
+        messages: renderedMessages
+      },
+      mergeKey: "group",
+      groupIdentity: this.groupIdentity(),
+      replyTarget: replyTargetFromMattermostPost(post)
+    });
   }
 
   async connect() {

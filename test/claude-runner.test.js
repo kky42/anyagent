@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 
 import { buildClaudeArgs } from "../src/cli_adapter/claude/args.js";
 import { startClaudeRun } from "../src/cli_adapter/claude/runner.js";
-import { ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS } from "../src/chat_adapter/common/output-instructions.js";
+import { PRIVATE_OUTPUT_DEVELOPER_INSTRUCTIONS } from "../src/chat_adapter/common/output-instructions.js";
 import { createFakeCliCommand } from "./support/fakes.js";
 
 test("buildClaudeArgs uses print stream-json for a fresh session", () => {
@@ -89,7 +89,7 @@ test("buildClaudeArgs appends model, effort, and attachment contract prompt", ()
     message: "hello",
     model: "sonnet",
     reasoningEffort: "high",
-    developerInstructions: ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS
+    developerInstructions: PRIVATE_OUTPUT_DEVELOPER_INSTRUCTIONS
   }), [
     "-p",
     "--output-format",
@@ -104,7 +104,7 @@ test("buildClaudeArgs appends model, effort, and attachment contract prompt", ()
     "--effort",
     "high",
     "--append-system-prompt",
-    ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS,
+    PRIVATE_OUTPUT_DEVELOPER_INSTRUCTIONS,
     "hello"
   ]);
 });

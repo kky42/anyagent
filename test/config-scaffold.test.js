@@ -29,18 +29,10 @@ test("buildCanonicalAgentConfig includes required profile defaults", () => {
       bindings: {
         telegram: {
           allowedUsernames: ["your-telegram-username"],
-          groupHistory: {
-            hours: 24,
-            messages: 1000
-          },
           bots: []
         },
         mattermost: {
           allowedUsernames: ["your-mattermost-username"],
-          groupHistory: {
-            hours: 24,
-            messages: 1000
-          },
           bots: []
         },
       }

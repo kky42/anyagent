@@ -27,6 +27,9 @@
   "scripts": {
     "start": "node ./bin/anyagent.js",
     "test": "node --test",
+    "test:e2e:agent-behavior": "node ./scripts/agent-behavior-e2e.js",
+    "test:e2e:mattermost": "node ./scripts/mattermost-local-e2e.js",
+    "smoke:contract-prompts": "node ./scripts/smoke-contract-prompts.js",
     "smoke:real-agents": "node ./scripts/smoke-real-agents.js",
     "verify:context-length": "node ./scripts/verify-context-length.js"
   },

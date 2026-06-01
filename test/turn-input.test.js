@@ -13,7 +13,7 @@ test("buildTurnInputMessage returns plain prompt when there are no attachments",
   );
 });
 
-test("buildTurnInputMessage renders all local attachments as XML entries", () => {
+test("buildTurnInputMessage renders all local attachments as plain text entries", () => {
   assert.equal(
     buildTurnInputMessage({
       promptText: "inspect",
@@ -25,26 +25,29 @@ test("buildTurnInputMessage renders all local attachments as XML entries", () =>
     [
       "inspect",
       "",
-      "<attachments>",
-      '<attachment path="/tmp/input.jpg" kind="photo" />',
-      '<attachment path="/tmp/spec.pdf" kind="document" />',
-      "</attachments>"
+      "Attached file:",
+      "- path: /tmp/input.jpg",
+      "- kind: photo",
+      "",
+      "Attached file:",
+      "- path: /tmp/spec.pdf",
+      "- kind: document"
     ].join("\n")
   );
 });
 
-test("buildTurnInputMessage escapes attachment XML attributes", () => {
+test("buildTurnInputMessage renders unavailable attachment paths", () => {
   assert.equal(
     buildTurnInputMessage({
       promptText: "",
       attachments: [
-        { kind: 'doc"ument', localPath: '/tmp/a&b/"quoted"<file>.pdf' }
+        { kind: "photo", localPath: "" }
       ]
     }),
     [
-      "<attachments>",
-      '<attachment path="/tmp/a&amp;b/&quot;quoted&quot;&lt;file&gt;.pdf" kind="doc&quot;ument" />',
-      "</attachments>"
+      "Attached file:",
+      "- path: unavailable",
+      "- kind: photo"
     ].join("\n")
   );
 });

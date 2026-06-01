@@ -5,7 +5,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { BotRuntime } from "../src/chat_adapter/mattermost/bot-runtime.js";
-import { isBotAddressed } from "../src/chat_adapter/mattermost/group-history.js";
 import { flush, waitFor } from "./support/async.js";
 import { createControlledRunnerFactory, FakeConfigStore } from "./support/fakes.js";
 
@@ -88,7 +87,6 @@ async function createRuntime(options = {}) {
     username: "relaybot",
     token: "token",
     allowedUsernames: ["alice"],
-    groupHistory: { hours: 24, messages: 1000 },
     agent: {
       id: "primary-agent",
       cli: "codex",
@@ -125,13 +123,6 @@ function postedEvent(post) {
     }
   };
 }
-
-test("Mattermost group mention matching requires the full username", () => {
-  assert.equal(isBotAddressed({ message: "@relay please answer" }, "relay"), true);
-  assert.equal(isBotAddressed({ message: "(@relay) please answer" }, "relay"), true);
-  assert.equal(isBotAddressed({ message: "@relay-helper please answer" }, "relay"), false);
-  assert.equal(isBotAddressed({ message: "@relay.foo please answer" }, "relay"), false);
-});
 
 test("Mattermost runtime retries user lookup after transient failures", async () => {
   class FlakyMattermostApi extends FakeMattermostApi {
@@ -457,7 +448,7 @@ test("Mattermost runtime treats each direct channel as one session and replies t
   assert.equal(botApi.posts[0].message, "done");
 });
 
-test("Mattermost group channels only trigger on mentions and keep channel session for threads", async () => {
+test("Mattermost group channels trigger every post and use separate sessions for threads", async () => {
   const { runtime, botApi, runnerFactory } = await createRuntime();
   botApi.channels.set("channel1", { id: "channel1", type: "O" });
   botApi.users.set("u1", { id: "u1", username: "alice" });
@@ -471,7 +462,9 @@ test("Mattermost group channels only trigger on mentions and keep channel sessio
     file_ids: []
   }));
   await flush();
-  assert.equal(runnerFactory.runs.length, 0);
+  assert.equal(runnerFactory.runs.length, 1);
+  assert.match(runnerFactory.runs[0].params.message, /^Messages since your last turn:/);
+  assert.match(runnerFactory.runs[0].params.message, /alice \(@alice\):\nunaddressed/);
 
   await runtime.handleEvent(postedEvent({
     id: "post2",
@@ -484,21 +477,20 @@ test("Mattermost group channels only trigger on mentions and keep channel sessio
   }));
   await flush();
 
-  assert.deepEqual([...runtime.sessions.keys()], ["channel1"]);
-  assert.equal(runnerFactory.runs.length, 1);
-  assert.match(runnerFactory.runs[0].params.message, /Context:/);
-  assert.match(runnerFactory.runs[0].params.message, /\[1970-\d\d-\d\d \d\d:\d\d:\d\d\] \[user @alice\]: unaddressed/);
-  assert.doesNotMatch(runnerFactory.runs[0].params.message, /UTC|Z\b|[+-]\d\d:\d\d/);
-  assert.match(runnerFactory.runs[0].params.message, /unaddressed/);
-  assert.match(runnerFactory.runs[0].params.message, /@relaybot please answer/);
-  await runnerFactory.runs[0].emit({
+  assert.deepEqual([...runtime.sessions.keys()], ["channel1", "channel1:thread:root1"]);
+  assert.equal(runnerFactory.runs.length, 2);
+  assert.match(runnerFactory.runs[1].params.message, /This transcript includes the thread root/);
+  assert.match(runnerFactory.runs[1].params.message, /root post/);
+  assert.match(runnerFactory.runs[1].params.message, /@relaybot please answer/);
+  await runnerFactory.runs[1].emit({
     type: "item.completed",
     item: {
       type: "agent_message",
-      text: "group done"
+      text: "<group_message><![CDATA[group done]]></group_message>"
     }
   });
   runnerFactory.runs[0].finish();
+  runnerFactory.runs[1].finish();
   await flush();
 
   assert.equal(botApi.posts[0].rootId, "root1");
@@ -522,4 +514,43 @@ test("Mattermost group addressed commands use the common command router", async 
 
   assert.equal(runnerFactory.runs.length, 0);
   assert.match(botApi.posts[0].message, /running: no/);
+});
+
+test("Mattermost group transcripts include sender nickname and username", async () => {
+  const { runtime, botApi, runnerFactory } = await createRuntime();
+  botApi.channels.set("channel1", { id: "channel1", type: "O" });
+  botApi.users.set("u1", { id: "u1", username: "y-xm", nickname: "Rick" });
+
+  await runtime.handleEvent(postedEvent({
+    id: "post1",
+    channel_id: "channel1",
+    user_id: "u1",
+    message: "please check this",
+    create_at: 1000,
+    file_ids: []
+  }));
+  await flush();
+
+  assert.equal(runnerFactory.runs.length, 1);
+  assert.match(runnerFactory.runs[0].params.message, /Rick \(@y-xm\):\nplease check this/);
+  runnerFactory.runs[0].finish();
+});
+
+test("Mattermost group relay commands require an authorized user", async () => {
+  const { runtime, botApi, runnerFactory } = await createRuntime();
+  botApi.channels.set("channel1", { id: "channel1", type: "O" });
+  botApi.users.set("u2", { id: "u2", username: "bob" });
+
+  await runtime.handleEvent(postedEvent({
+    id: "post1",
+    channel_id: "channel1",
+    user_id: "u2",
+    message: "@relaybot /auto high",
+    create_at: 1000,
+    file_ids: []
+  }));
+  await flush();
+
+  assert.equal(runnerFactory.runs.length, 0);
+  assert.deepEqual(botApi.posts, []);
 });

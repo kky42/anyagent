@@ -57,7 +57,6 @@ test("loadConfig loads agent profiles and telegram bindings", async () => {
   assert.equal(config.telegramBots[0].username, "relaybot");
   assert.equal(config.telegramBots[0].bindingId, "relaybot");
   assert.deepEqual(config.telegramBots[0].allowedUsernames, ["owneruser", "alloweduser"]);
-  assert.deepEqual(config.telegramBots[0].groupHistory, { hours: 24, messages: 1000 });
   assert.equal(config.telegramBots[0].agent.id, "primary");
   assert.equal(config.telegramBots[0].agent.workdir, workdir);
   assert.equal(config.chatBindings.length, 1);
@@ -73,35 +72,6 @@ test("loadConfig loads agent profiles and telegram bindings", async () => {
   assert.equal(bindingConfig?.bindingId, "relaybot");
 });
 
-test("loadConfig accepts telegram group history settings", async () => {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-config-"));
-  const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-workdir-"));
-
-  await writeAgentConfig(tempDir, "primary", {
-    profile: {
-      cli: "codex",
-      workdir
-    },
-    bindings: {
-      telegram: {
-        groupHistory: {
-          hours: 6,
-          messages: 50
-        },
-        bots: [
-          {
-            username: "RelayBot",
-            token: "token-1"
-          }
-        ]
-      }
-    }
-  });
-
-  const config = await loadConfig(tempDir);
-  assert.deepEqual(config.telegramBots[0].groupHistory, { hours: 6, messages: 50 });
-});
-
 test("loadConfig loads mattermost bindings", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-config-"));
   const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-workdir-"));
@@ -114,10 +84,6 @@ test("loadConfig loads mattermost bindings", async () => {
     bindings: {
       mattermost: {
         allowedUsernames: ["@OwnerUser"],
-        groupHistory: {
-          hours: 12,
-          messages: 75
-        },
         bots: [
           {
             serverUrl: "http://localhost:8065/",
@@ -138,7 +104,6 @@ test("loadConfig loads mattermost bindings", async () => {
   assert.equal(config.mattermostBots[0].username, "relaybot");
   assert.equal(config.mattermostBots[0].bindingId, "localhost:8065:relaybot");
   assert.deepEqual(config.mattermostBots[0].allowedUsernames, ["owneruser", "allowed.user"]);
-  assert.deepEqual(config.mattermostBots[0].groupHistory, { hours: 12, messages: 75 });
   assert.equal(config.mattermostBots[0].agent.workdir, workdir);
   assert.equal(config.chatBindings[0], config.mattermostBots[0]);
 

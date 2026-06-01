@@ -211,6 +211,21 @@ export class ChatSession extends CommonChatSession {
     return attachments;
   }
 
+  async stageInputAttachmentsFromMessage(message) {
+    const descriptor = attachmentDescriptorFromMessage(message);
+    if (!descriptor) {
+      return [];
+    }
+
+    try {
+      const attachment = await this.stageAttachment(descriptor);
+      return [{ kind: attachment.kind, localPath: attachment.localPath }];
+    } catch (error) {
+      this.logger(`incoming attachment unavailable: ${toErrorMessage(error)}`);
+      return [{ kind: descriptor.kind, localPath: "unavailable" }];
+    }
+  }
+
   async handleAttachmentMessages(messages) {
     if (!Array.isArray(messages) || messages.length === 0) {
       return;

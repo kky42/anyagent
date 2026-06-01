@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 
 import { buildCodexArgs } from "../src/cli_adapter/codex/args.js";
 import { startCodexRun } from "../src/cli_adapter/codex/runner.js";
-import { ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS } from "../src/chat_adapter/common/output-instructions.js";
+import { PRIVATE_OUTPUT_DEVELOPER_INSTRUCTIONS } from "../src/chat_adapter/common/output-instructions.js";
 import { createFakeCliCommand } from "./support/fakes.js";
 
 test("buildCodexArgs uses exec for a fresh session", () => {
@@ -117,21 +117,21 @@ test("buildCodexArgs appends model and reasoning-effort when provided", () => {
 test("buildCodexArgs injects developer_instructions only for fresh sessions", () => {
   const freshArgs = buildCodexArgs({
     message: "hello",
-    developerInstructions: ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS
+    developerInstructions: PRIVATE_OUTPUT_DEVELOPER_INSTRUCTIONS
   });
   const resumedArgs = buildCodexArgs({
     sessionId: "session-123",
     message: "hello",
-    developerInstructions: ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS
+    developerInstructions: PRIVATE_OUTPUT_DEVELOPER_INSTRUCTIONS
   });
 
   assert.ok(freshArgs.includes("-c"));
   assert.ok(
     freshArgs.includes(
-      `developer_instructions=${JSON.stringify(ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS)}`
+      `developer_instructions=${JSON.stringify(PRIVATE_OUTPUT_DEVELOPER_INSTRUCTIONS)}`
     )
   );
-  assert.doesNotMatch(ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS, /Telegram|HTML|Markdown/i);
+  assert.doesNotMatch(PRIVATE_OUTPUT_DEVELOPER_INSTRUCTIONS, /Telegram|HTML|Markdown/i);
   assert.ok(
     !resumedArgs.some((arg) => arg.startsWith("developer_instructions="))
   );

@@ -4,31 +4,25 @@
  * @property {any[]} attachments
  */
 
-function escapeXmlAttribute(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+export function formatInputAttachment(attachment) {
+  const localPath = String(attachment?.localPath ?? attachment?.path ?? "unavailable").trim() || "unavailable";
+  const kind = String(attachment?.kind ?? "document").trim() || "document";
+  return [
+    "Attached file:",
+    `- path: ${localPath}`,
+    `- kind: ${kind}`
+  ].join("\n");
 }
 
 function buildAttachmentPrompt(promptText, attachments) {
   const normalizedPrompt = String(promptText ?? "").trim();
-  const localAttachments = attachments.filter((attachment) => attachment?.localPath);
+  const localAttachments = attachments.filter(Boolean);
 
   if (localAttachments.length === 0) {
     return normalizedPrompt;
   }
 
-  const attachmentLines = ["<attachments>"];
-  for (const attachment of localAttachments) {
-    attachmentLines.push(
-      `<attachment path="${escapeXmlAttribute(attachment.localPath)}" kind="${escapeXmlAttribute(attachment.kind)}" />`
-    );
-  }
-  attachmentLines.push("</attachments>");
-
-  const attachmentBlock = attachmentLines.join("\n");
+  const attachmentBlock = localAttachments.map(formatInputAttachment).join("\n\n");
   return normalizedPrompt ? `${normalizedPrompt}\n\n${attachmentBlock}` : attachmentBlock;
 }
 

@@ -190,6 +190,22 @@ export class ChatSession extends CommonChatSession {
     return attachments;
   }
 
+  async stageInputAttachmentsFromPost(post) {
+    const attachments = [];
+
+    for (const descriptor of attachmentDescriptorsFromPost(post)) {
+      try {
+        const attachment = await this.stageAttachment(descriptor);
+        attachments.push({ kind: attachment.kind, localPath: attachment.localPath });
+      } catch (error) {
+        this.logger(`incoming attachment unavailable: ${toErrorMessage(error)}`);
+        attachments.push({ kind: descriptor.kind, localPath: "unavailable" });
+      }
+    }
+
+    return attachments;
+  }
+
   async handleAttachmentPosts(posts) {
     if (!Array.isArray(posts) || posts.length === 0) {
       return;

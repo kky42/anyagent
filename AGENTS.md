@@ -30,6 +30,58 @@ HTTP_PROXY=http://127.0.0.1:7890 HTTPS_PROXY=http://127.0.0.1:7890 npm start
 
 - This is especially relevant when `api.telegram.org` resolves to a proxy fake-IP range such as `198.18.0.0/15`; in that case, Node may fail unless the proxy variables are set explicitly.
 
+## Mattermost Local End-To-End
+
+- Whenever Mattermost runtime, API, renderer, attachment, command-routing, group-input, or config behavior is touched, run the local Mattermost E2E before considering the change complete:
+
+```bash
+npm run test:e2e:mattermost
+```
+
+- The script launches a disposable local Mattermost server with Docker, provisions temporary users/team/channel/direct-message state through the Mattermost HTTP API, starts AnyAgent against that server, and drives direct and group behavior end to end through the real Mattermost WebSocket/API path.
+- The script uses a generated fake `codex` executable on `PATH`; it does not call a real model or use real chat credentials. It verifies the relay contract, connection behavior, visible replies, suppressed group raw text, file upload delivery, and websocket reconnect after a local server restart.
+- Default server settings:
+  - image: `mattermost/mattermost-preview:latest`
+  - container: `anyagent-mattermost-e2e`
+  - URL: `http://localhost:18065`
+  - Docker platform: `linux/amd64`
+- The preview image may not publish a native arm64 manifest. Keep `MATTERMOST_E2E_DOCKER_PLATFORM=linux/amd64` on Apple Silicon unless a native-compatible image is selected.
+- Useful overrides:
+
+```bash
+MATTERMOST_E2E_PORT=18066 npm run test:e2e:mattermost
+MATTERMOST_E2E_KEEP_SERVER=1 npm run test:e2e:mattermost
+MATTERMOST_E2E_KEEP_TEMP=1 npm run test:e2e:mattermost
+MATTERMOST_E2E_RESTART_SERVER=0 npm run test:e2e:mattermost
+MATTERMOST_E2E_SERVER_URL=http://localhost:8065 npm run test:e2e:mattermost
+```
+
+- `MATTERMOST_E2E_SERVER_URL` reuses an existing server instead of launching Docker. That server must allow the script to create test users through the Mattermost API.
+- If the Mattermost E2E fails, inspect the script output first. With `MATTERMOST_E2E_KEEP_TEMP=1`, the generated AnyAgent config, fake Codex log, and workspace artifacts remain in the printed temp directory.
+
+## Output Contract Tests
+
+- The deterministic relay contract tests run as part of `npm test`:
+  - `test/mattermost-contract-e2e.test.js`
+  - `test/telegram-contract-e2e.test.js`
+- These tests simulate private and group chat turns through the real runtime/session/renderer path, then assert:
+  - private turns receive the private attachment developer instructions
+  - private `ATTACH` directives are delivered as files
+  - group turns receive the group chat developer instructions
+  - unrelated group `NO_REPLY` output produces no visible chat post
+  - related group output inside `REPLY` blocks is delivered
+  - group `ATTACH` directives inside `REPLY` blocks are delivered as files
+- For real agent behavior checks against a real CLI/model, use the opt-in agent behavior E2E:
+
+```bash
+npm run test:e2e:agent-behavior
+```
+
+- `test:e2e:agent-behavior` defaults to Codex and can be targeted with `AGENT_BEHAVIOR_TARGETS=codex,claude,pi` or `AGENT_BEHAVIOR_TARGETS=all`.
+- This E2E runs real CLI agents through the adapter and verifies contract shape only: private file/image `ATTACH` directives, explicit `NO_REPLY` for unrelated group context, `REPLY` blocks for addressed group messages, multiple `REPLY` blocks for mixed group context, and group attachment replies.
+- Use `AGENT_BEHAVIOR_KEEP_TEMP=1` when investigating failures. Do not treat this E2E as a replacement for `npm test`; real model behavior can vary.
+- `npm run smoke:contract-prompts` remains as a backwards-compatible alias for the same agent behavior E2E and still accepts the old `CONTRACT_PROMPT_*` environment variable names.
+
 ## Adapter Layout
 
 - The package and CLI are named `anyagent`.

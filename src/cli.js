@@ -64,6 +64,11 @@ function parseArgs(argv) {
   throw new Error(`Unknown command: ${command}`);
 }
 
+function keepProcessAlive() {
+  const timer = setInterval(() => {}, 60000);
+  return () => clearInterval(timer);
+}
+
 async function runServer(configPath) {
   const config = await loadConfig(configPath);
   const configStore = new ConfigStore(config.configPath);
@@ -82,9 +87,7 @@ async function runServer(configPath) {
     if (botConfig.platform === "mattermost") {
       return new MattermostBotRuntime({
         botConfig,
-        configStore,
-        groupHistoryHours: botConfig.groupHistory?.hours,
-        groupHistoryMessages: botConfig.groupHistory?.messages
+        configStore
       });
     }
     throw new Error(`Unsupported chat binding platform: ${botConfig.platform}`);
@@ -114,13 +117,18 @@ async function runServer(configPath) {
     `Running ${runtimes.length} chat bot${runtimes.length === 1 ? "" : "s"} using ${config.configPath}\n`
   );
 
-  await Promise.all(
-    runtimes.map((runtime) =>
-      (runtime.pollPromise ?? runtime.connectPromise)?.catch((error) => {
-        throw new Error(`Bot runtime failed: ${toErrorMessage(error)}`);
-      })
-    )
-  );
+  const stopKeepAlive = keepProcessAlive();
+  try {
+    await Promise.all(
+      runtimes.map((runtime) =>
+        (runtime.pollPromise ?? runtime.connectPromise)?.catch((error) => {
+          throw new Error(`Bot runtime failed: ${toErrorMessage(error)}`);
+        })
+      )
+    );
+  } finally {
+    stopKeepAlive();
+  }
 }
 
 async function addAgent(args) {

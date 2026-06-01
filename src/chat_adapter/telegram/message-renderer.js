@@ -6,7 +6,11 @@ import {
   outboundAttachmentLimitText
 } from "../common/attachments.js";
 import { splitPlainText, toErrorMessage } from "../../utils.js";
-import { parseOutputSegments } from "../common/output-attachments.js";
+import {
+  parseGroupMessageBodySegments,
+  parseGroupOutputSegments,
+  parseOutputSegments
+} from "../common/output-attachments.js";
 import { renderMarkdownToTelegramHtml } from "./markdown-renderer.js";
 import { escapeTelegramMarkdown } from "./render.js";
 import { TelegramApiError } from "./telegram-api.js";
@@ -325,26 +329,23 @@ export class MessageRenderer {
 
   async renderOutputSegments(segments, options = {}) {
     const deliverText = options.deliverText ?? ((text) => this.sendText(text, options));
+    const suppressRawText = Boolean(options.suppressRawText);
+    const deliverGroupMessages = Boolean(options.deliverGroupMessages);
     let hasVisibleOutput = false;
 
-    for (const segment of segments) {
-      if (segment.kind === "text") {
-        if (!hasVisibleText(segment.text)) {
-          continue;
-        }
-        await deliverText(segment.text);
-        hasVisibleOutput = true;
-        continue;
+    const renderVisibleText = async (text) => {
+      if (!hasVisibleText(text)) {
+        return;
       }
+      await deliverText(text);
+      hasVisibleOutput = true;
+    };
 
+    const renderAttachmentSegment = async (segment) => {
       for (const entry of segment.entries) {
         const result = await this.deliverAttachmentEntry(entry, options);
         if (result.kind === "text") {
-          if (!hasVisibleText(result.text)) {
-            continue;
-          }
-          await deliverText(result.text);
-          hasVisibleOutput = true;
+          await renderVisibleText(result.text);
           continue;
         }
 
@@ -353,6 +354,40 @@ export class MessageRenderer {
         }
         hasVisibleOutput = true;
       }
+    };
+
+    for (const segment of segments) {
+      if (segment.kind === "text") {
+        if (suppressRawText) {
+          continue;
+        }
+        await renderVisibleText(segment.text);
+        continue;
+      }
+
+      if (segment.kind === "group_message") {
+        const text = deliverGroupMessages ? segment.text : segment.rawText;
+        if (suppressRawText && !deliverGroupMessages) {
+          continue;
+        }
+
+        if (!deliverGroupMessages) {
+          await renderVisibleText(text);
+          continue;
+        }
+
+        const bodySegments = parseGroupMessageBodySegments(text);
+        for (const bodySegment of bodySegments) {
+          if (bodySegment.kind === "attachment") {
+            await renderAttachmentSegment(bodySegment);
+            continue;
+          }
+          await renderVisibleText(bodySegment.text);
+        }
+        continue;
+      }
+
+      await renderAttachmentSegment(segment);
     }
   }
 
@@ -373,6 +408,20 @@ export class MessageRenderer {
     await this.renderOutputSegments(segments, {
       ...options,
       clearProgressAfterFirstAttachment: true,
+      deliverText: (rawText) =>
+        this.renderTerminalText(rawText, {
+          ...options,
+          renderMarkdown: true
+        })
+    });
+  }
+
+  async renderGroupFinalMessage(text, options = {}) {
+    const segments = parseGroupOutputSegments(String(text ?? ""));
+    await this.renderOutputSegments(segments, {
+      ...options,
+      suppressRawText: true,
+      deliverGroupMessages: true,
       deliverText: (rawText) =>
         this.renderTerminalText(rawText, {
           ...options,

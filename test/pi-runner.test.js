@@ -10,7 +10,7 @@ import {
   resetPiFeatureDetectionCache,
   startPiRun
 } from "../src/cli_adapter/pi/runner.js";
-import { ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS } from "../src/chat_adapter/common/output-instructions.js";
+import { PRIVATE_OUTPUT_DEVELOPER_INSTRUCTIONS } from "../src/chat_adapter/common/output-instructions.js";
 import { createFakeCliCommand } from "./support/fakes.js";
 
 test("buildPiArgs uses print json mode for a fresh session", () => {
@@ -95,12 +95,12 @@ test("buildPiArgs appends model, thinking, and attachment contract", () => {
     message: "hello",
     model: "deepseek/deepseek-v4-flash",
     reasoningEffort: "high",
-    developerInstructions: ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS
+    developerInstructions: PRIVATE_OUTPUT_DEVELOPER_INSTRUCTIONS
   });
   const resumedArgs = buildPiArgs({
     sessionId: "session-123",
     message: "hello",
-    developerInstructions: ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS
+    developerInstructions: PRIVATE_OUTPUT_DEVELOPER_INSTRUCTIONS
   });
 
   assert.deepEqual(freshArgs, [
@@ -112,7 +112,7 @@ test("buildPiArgs appends model, thinking, and attachment contract", () => {
     "--thinking",
     "high",
     "--append-system-prompt",
-    ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS,
+    PRIVATE_OUTPUT_DEVELOPER_INSTRUCTIONS,
     "hello"
   ]);
   assert.deepEqual(resumedArgs, [
@@ -120,7 +120,7 @@ test("buildPiArgs appends model, thinking, and attachment contract", () => {
     "--mode",
     "json",
     "--append-system-prompt",
-    ATTACHMENT_OUTPUT_DEVELOPER_INSTRUCTIONS,
+    PRIVATE_OUTPUT_DEVELOPER_INSTRUCTIONS,
     "--session",
     "session-123",
     "hello"

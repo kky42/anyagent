@@ -14,11 +14,13 @@ class FakeChatOutput {
     this.texts = [];
     this.progress = [];
     this.finals = [];
+    this.groupFinals = [];
     this.errors = [];
     this.typing = [];
     this.stopTypingCount = 0;
     this.resetCount = 0;
     this.clearProgressCount = 0;
+    this.groupFinalFailure = null;
   }
 
   resetTransientState() {
@@ -53,6 +55,13 @@ class FakeChatOutput {
 
   async renderFinalMessage(text, options = {}) {
     this.finals.push({ text, options });
+  }
+
+  async renderGroupFinalMessage(text, options = {}) {
+    if (this.groupFinalFailure) {
+      throw this.groupFinalFailure;
+    }
+    this.groupFinals.push({ text, options });
   }
 
   async renderErrorText(text, options = {}) {
@@ -170,6 +179,43 @@ test("common ChatSession owns queueing, run orchestration, and opaque reply targ
   assert.equal(output.stopTypingCount, 1);
   assert.match(logs[0], /starting codex run/);
   assert.equal(runnerFactory.runs[1].params.sessionId, "session-1");
+});
+
+test("common ChatSession logs group output delivery failures separately from agent process errors", async () => {
+  const output = new FakeChatOutput();
+  output.groupFinalFailure = new TypeError("fetch failed");
+  const { session, runnerFactory, logs } = await createCommonSession({ output });
+
+  await session.enqueueTurn({
+    mode: "group",
+    promptText: "Messages since your last turn:\n\nalice (@alice):\nhello",
+    replyTarget: { channelId: "channel-1" },
+    groupIdentity: {
+      botName: "Relay Bot",
+      botHandle: "@relaybot"
+    }
+  });
+  const run = runnerFactory.runs[0];
+  await run.emit({
+    type: "item.completed",
+    item: {
+      type: "agent_message",
+      text: "REPLY @alice\nhello"
+    }
+  });
+  await run.emit({
+    type: "turn.completed"
+  });
+  run.finish();
+
+  await waitFor(() => !session.isRunning);
+
+  assert.deepEqual(output.groupFinals, []);
+  assert.equal(
+    logs.some((message) => /group output delivery failed: fetch failed/.test(message)),
+    true
+  );
+  assert.equal(logs.some((message) => /process error/.test(message)), false);
 });
 
 test("common ChatSession cache scopes use generic platform and binding ids", async () => {

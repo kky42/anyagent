@@ -119,10 +119,11 @@ test("runtime aggregates media groups into one attachment turn", async () => {
 
   await waitFor(() => runnerFactory.runs.length === 1, 20);
 
-  assert.match(runnerFactory.runs[0].params.message, /^compare these\n\n<attachments>/);
+  assert.match(runnerFactory.runs[0].params.message, /^compare these\n\nAttached file:/);
   assert.equal("imagePaths" in runnerFactory.runs[0].params, false);
-  assert.match(runnerFactory.runs[0].params.message, /photo--m101\.jpg" kind="photo"/);
-  assert.match(runnerFactory.runs[0].params.message, /photo--m102\.jpg" kind="photo"/);
+  assert.match(runnerFactory.runs[0].params.message, /photo--m101\.jpg/);
+  assert.match(runnerFactory.runs[0].params.message, /photo--m102\.jpg/);
+  assert.match(runnerFactory.runs[0].params.message, /- kind: photo/);
   runnerFactory.runs[0].finish();
 });
 
@@ -399,29 +400,35 @@ test("runtime routes first private topic message without quoting it", async () =
   });
 });
 
-test("runtime stores group messages and only addressed messages trigger agent runs", async () => {
+test("runtime sends every group message and silently coalesces pending group turns", async () => {
   const { runtime, runnerFactory } = await createRuntime();
 
   await runtime.handleMessage(buildGroupTextMessage("background one", { message_id: 1 }));
+  assert.equal(runnerFactory.runs.length, 1);
+  assert.match(runnerFactory.runs[0].params.message, /^Messages since your last turn:/);
+  assert.match(runnerFactory.runs[0].params.message, /\[2023-\d\d-\d\d \d\d:\d\d:\d\d\] alloweduser \(@alloweduser\):\nbackground one/);
+  assert.doesNotMatch(runnerFactory.runs[0].params.message, /Context:|Message to you:/);
+
   await runtime.handleMessage(buildGroupTextMessage("background two", { message_id: 2 }));
-
-  assert.equal(runnerFactory.runs.length, 0);
-
   await runtime.handleMessage(buildGroupTextMessage("@relaybot summarize", { message_id: 3 }));
 
+  const session = runtime.sessionFor(-1001);
   assert.equal(runnerFactory.runs.length, 1);
-  assert.match(runnerFactory.runs[0].params.message, /^Context:\n/);
-  assert.match(runnerFactory.runs[0].params.message, /\[2023-\d\d-\d\d \d\d:\d\d:\d\d\] \[user @alloweduser\]: background one/);
-  assert.doesNotMatch(runnerFactory.runs[0].params.message, /UTC|Z\b|[+-]\d\d:\d\d/);
-  assert.match(runnerFactory.runs[0].params.message, /\[user @alloweduser\]: background one/);
-  assert.match(runnerFactory.runs[0].params.message, /\[user @alloweduser\]: background two/);
-  assert.match(runnerFactory.runs[0].params.message, /Message to you:\n.*@relaybot summarize/);
-  assert.match(runnerFactory.runs[0].params.message, /attachments:\n\(none\)/);
-  assert.match(runnerFactory.runs[0].params.message, /reference:\n\(none\)/);
+  assert.equal(session.queue.length, 1);
+  assert.match(session.queue[0].promptText, /background two/);
+  assert.match(session.queue[0].promptText, /@relaybot summarize/);
+
   runnerFactory.runs[0].finish();
+  await waitFor(() => runnerFactory.runs.length === 2, 20);
+
+  assert.equal(runnerFactory.runs.length, 2);
+  assert.match(runnerFactory.runs[1].params.message, /background two/);
+  assert.match(runnerFactory.runs[1].params.message, /@relaybot summarize/);
+  runnerFactory.runs[1].finish();
+  await waitFor(() => session.isRunning === false, 20);
 });
 
-test("runtime stores unauthorized group messages as context without triggering runs", async () => {
+test("runtime lets any group participant trigger the agent", async () => {
   const { runtime, runnerFactory } = await createRuntime();
 
   await runtime.handleMessage(
@@ -430,56 +437,28 @@ test("runtime stores unauthorized group messages as context without triggering r
       from: { id: 99, username: "OtherUser" }
     })
   );
-  await runtime.handleMessage(buildGroupTextMessage("@relaybot summarize", { message_id: 2 }));
 
   assert.equal(runnerFactory.runs.length, 1);
-  assert.match(runnerFactory.runs[0].params.message, /\[user @otheruser\]: uploads fail after deploy/);
-  assert.match(runnerFactory.runs[0].params.message, /Message to you:\n.*@relaybot summarize/);
+  assert.match(runnerFactory.runs[0].params.message, /otheruser \(@otheruser\):\nuploads fail after deploy/);
   runnerFactory.runs[0].finish();
 });
 
-test("runtime sends only messages after the previous group trigger as next context", async () => {
+test("runtime includes Telegram group sender display name and username", async () => {
   const { runtime, runnerFactory } = await createRuntime();
 
-  await runtime.handleMessage(buildGroupTextMessage("first context", { message_id: 1 }));
-  await runtime.handleMessage(buildGroupTextMessage("@relaybot first", { message_id: 2 }));
-  runnerFactory.runs[0].finish();
-  await waitFor(() => runtime.sessionFor(-1001).isRunning === false, 20);
-
-  await runtime.handleMessage(buildGroupTextMessage("second context", { message_id: 3 }));
-  await runtime.handleMessage(buildGroupTextMessage("@relaybot second", { message_id: 4 }));
-
-  assert.equal(runnerFactory.runs.length, 2);
-  assert.doesNotMatch(runnerFactory.runs[1].params.message, /first context/);
-  assert.doesNotMatch(runnerFactory.runs[1].params.message, /@relaybot first/);
-  assert.match(runnerFactory.runs[1].params.message, /second context/);
-  assert.match(runnerFactory.runs[1].params.message, /@relaybot second/);
-  runnerFactory.runs[1].finish();
-});
-
-test("runtime applies group history message limits", async () => {
-  const { runtime, runnerFactory } = await createRuntime({
-    botConfig: {
-      groupHistory: {
-        hours: 24,
-        messages: 2
-      }
-    }
-  });
-
-  await runtime.handleMessage(buildGroupTextMessage("old one", { message_id: 1 }));
-  await runtime.handleMessage(buildGroupTextMessage("old two", { message_id: 2 }));
-  await runtime.handleMessage(buildGroupTextMessage("kept", { message_id: 3 }));
-  await runtime.handleMessage(buildGroupTextMessage("@relaybot go", { message_id: 4 }));
+  await runtime.handleMessage(
+    buildGroupTextMessage("please check this", {
+      message_id: 1,
+      from: { id: 99, username: "y_xm", first_name: "Rick" }
+    })
+  );
 
   assert.equal(runnerFactory.runs.length, 1);
-  assert.doesNotMatch(runnerFactory.runs[0].params.message, /old one/);
-  assert.doesNotMatch(runnerFactory.runs[0].params.message, /old two/);
-  assert.match(runnerFactory.runs[0].params.message, /kept/);
+  assert.match(runnerFactory.runs[0].params.message, /Rick \(@y_xm\):\nplease check this/);
   runnerFactory.runs[0].finish();
 });
 
-test("runtime stages only group trigger and reference attachments", async () => {
+test("runtime renders group attachments as plain path and kind near their message", async () => {
   const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
   fakeBotApi.registerFile("history-doc", {
     filePath: "documents/history.pdf",
@@ -489,11 +468,6 @@ test("runtime stages only group trigger and reference attachments", async () => 
     filePath: "documents/trigger.pdf",
     body: Buffer.from("trigger")
   });
-  fakeBotApi.registerFile("reference-doc", {
-    filePath: "documents/reference.pdf",
-    body: Buffer.from("reference")
-  });
-
   await runtime.handleMessage({
     message_id: 1,
     date: 1700000001,
@@ -508,27 +482,19 @@ test("runtime stages only group trigger and reference attachments", async () => 
       file_size: 7
     }
   });
+  assert.deepEqual(fakeBotApi.getFileCalls, ["history-doc"]);
+  assert.equal(runnerFactory.runs.length, 1);
+  assert.match(runnerFactory.runs[0].params.message, /history attachment/);
+  assert.match(runnerFactory.runs[0].params.message, /Attached file:\n- path: .*history--m1\.pdf\n- kind: document/);
+  runnerFactory.runs[0].finish();
+  await waitFor(() => runtime.sessionFor(-1001).isRunning === false, 20);
+
   await runtime.handleMessage({
     message_id: 2,
     date: 1700000002,
     chat: { id: -1001, type: "supergroup" },
     from: { id: 43, username: "AllowedUser" },
-    caption: "@relaybot inspect",
-    caption_entities: [{ type: "mention", offset: 0, length: "@relaybot".length }],
-    reply_to_message: {
-      message_id: 99,
-      date: 1700000000,
-      chat: { id: -1001, type: "supergroup" },
-      from: { id: 44, username: "OtherUser" },
-      caption: "reference file",
-      document: {
-        file_id: "reference-doc",
-        file_unique_id: "reference-doc",
-        file_name: "reference.pdf",
-        mime_type: "application/pdf",
-        file_size: 9
-      }
-    },
+    caption: "inspect",
     document: {
       file_id: "trigger-doc",
       file_unique_id: "trigger-doc",
@@ -538,17 +504,12 @@ test("runtime stages only group trigger and reference attachments", async () => 
     }
   });
 
-  assert.deepEqual(fakeBotApi.getFileCalls, ["trigger-doc", "reference-doc"]);
-  assert.equal(runnerFactory.runs.length, 1);
-  assert.match(
-    runnerFactory.runs[0].params.message,
-    /history attachment \[attachment: document; history\.pdf; application\/pdf; 7 bytes\]/
-  );
-  assert.match(runnerFactory.runs[0].params.message, /reference file/);
-  assert.match(runnerFactory.runs[0].params.message, /<attachment path=".*trigger--m2\.pdf" kind="document" \/>/);
-  assert.match(runnerFactory.runs[0].params.message, /<attachment path=".*reference--m99\.pdf" kind="document" \/>/);
-  assert.equal("imagePaths" in runnerFactory.runs[0].params, false);
-  runnerFactory.runs[0].finish();
+  assert.deepEqual(fakeBotApi.getFileCalls, ["history-doc", "trigger-doc"]);
+  assert.equal(runnerFactory.runs.length, 2);
+  assert.match(runnerFactory.runs[1].params.message, /inspect/);
+  assert.match(runnerFactory.runs[1].params.message, /Attached file:\n- path: .*trigger--m2\.pdf\n- kind: document/);
+  assert.equal("imagePaths" in runnerFactory.runs[1].params, false);
+  runnerFactory.runs[1].finish();
 });
 
 test("runtime sends addressed group albums as one turn with all media siblings", async () => {
@@ -598,19 +559,19 @@ test("runtime sends addressed group albums as one turn with all media siblings",
   await waitFor(() => runnerFactory.runs.length === 1, 20);
 
   assert.deepEqual(fakeBotApi.getFileCalls, ["album-photo-1", "album-photo-2", "album-photo-3"]);
-  assert.match(runnerFactory.runs[0].params.message, /Message to you:\n.*@relaybot compare these/);
-  assert.match(runnerFactory.runs[0].params.message, /photo--m10\.jpg" kind="photo"/);
-  assert.match(runnerFactory.runs[0].params.message, /photo--m11\.jpg" kind="photo"/);
-  assert.match(runnerFactory.runs[0].params.message, /photo--m12\.jpg" kind="photo"/);
+  assert.match(runnerFactory.runs[0].params.message, /@relaybot compare these/);
+  assert.match(runnerFactory.runs[0].params.message, /photo--m10\.jpg/);
+  assert.match(runnerFactory.runs[0].params.message, /photo--m11\.jpg/);
+  assert.match(runnerFactory.runs[0].params.message, /photo--m12\.jpg/);
   assert.equal("imagePaths" in runnerFactory.runs[0].params, false);
   runnerFactory.runs[0].finish();
   await waitFor(() => runtime.sessionFor(-1001).isRunning === false, 20);
 
-  await runtime.handleMessage(buildGroupTextMessage("@relaybot next", { message_id: 13 }));
+  await runtime.handleMessage(buildGroupTextMessage("next", { message_id: 13 }));
 
   assert.equal(runnerFactory.runs.length, 2);
-  assert.doesNotMatch(runnerFactory.runs[1].params.message, /\[attachment: photo; 3 bytes\]/);
-  assert.doesNotMatch(runnerFactory.runs[1].params.message, /\[attachment: photo; 5 bytes\]/);
+  assert.doesNotMatch(runnerFactory.runs[1].params.message, /photo--m10\.jpg/);
+  assert.match(runnerFactory.runs[1].params.message, /next/);
   runnerFactory.runs[1].finish();
 });
 
@@ -650,7 +611,21 @@ test("runtime routes addressed group commands without starting an agent run", as
   assert.match(fakeBotApi.messages.at(-1).text, /running: no/);
 });
 
-test("runtime treats private topic messages as group-like addressed conversations", async () => {
+test("runtime ignores relay commands from unauthorized Telegram group users", async () => {
+  const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
+
+  await runtime.handleMessage(
+    buildGroupTextMessage("/auto@relaybot high", {
+      from: { id: 99, username: "OtherUser" },
+      entities: [{ type: "bot_command", offset: 0, length: "/auto@relaybot".length }]
+    })
+  );
+
+  assert.equal(runnerFactory.runs.length, 0);
+  assert.equal(fakeBotApi.messages.length, 0);
+});
+
+test("runtime treats private topic messages as group-like conversations", async () => {
   const { runtime, runnerFactory, fakeBotApi } = await createRuntime();
 
   await runtime.handleMessage(
@@ -685,16 +660,16 @@ test("runtime treats private topic messages as group-like addressed conversation
 
   assert.equal(runnerFactory.runs.length, 1);
   assert.equal(fakeBotApi.messages.length, 1);
-  assert.match(fakeBotApi.messages[0].text, /running: no/);
-  assert.match(runnerFactory.runs[0].params.message, /^Context:\n/);
-  assert.match(runnerFactory.runs[0].params.message, /\[user @alloweduser\]: hi/);
-  assert.match(runnerFactory.runs[0].params.message, /\[user @alloweduser\]: \/status @relaybot/);
-  assert.match(
-    runnerFactory.runs[0].params.message,
-    /Message to you:\n.*@relaybot can you see history messages\?/
-  );
+  assert.match(fakeBotApi.messages[0].text, /running: yes/);
+  assert.match(runnerFactory.runs[0].params.message, /^Messages since your last turn:/);
+  assert.match(runnerFactory.runs[0].params.message, /alloweduser \(@alloweduser\):\nhi/);
+  const session = runtime.sessionFor(12345, { conversationId: "12345:topic:777" });
+  assert.equal(session.queue.length, 1);
+  assert.match(session.queue[0].promptText, /@relaybot can you see history messages\?/);
   assert.equal(runtime.sessions.has("12345:topic:777"), true);
   runnerFactory.runs[0].finish();
+  await waitFor(() => runnerFactory.runs.length === 2, 20);
+  runnerFactory.runs[1].finish();
 });
 
 test("runtime routes existing private topic messages with Telegram message_thread_id", async () => {

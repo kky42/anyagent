@@ -41,13 +41,14 @@ test("session stages photo attachments and passes path references to Codex", asy
   assert.equal(runnerFactory.runs.length, 1);
   assert.deepEqual(fakeBotApi.getFileCalls, ["photo-1"]);
   assert.equal("imagePaths" in runnerFactory.runs[0].params, false);
-  assert.match(runnerFactory.runs[0].params.message, /<attachments>/);
+  assert.match(runnerFactory.runs[0].params.message, /Attached file:/);
   assert.match(scope.scopeHash, /^[a-f0-9]{8}$/);
   assert.match(
     runnerFactory.runs[0].params.message,
-    new RegExp(`path="${escapeRegExp(scope.scopeDir)}`)
+    new RegExp(`- path: ${escapeRegExp(scope.scopeDir)}`)
   );
-  assert.match(runnerFactory.runs[0].params.message, /photo--m11\.jpg" kind="photo"/);
+  assert.match(runnerFactory.runs[0].params.message, /photo--m11\.jpg/);
+  assert.match(runnerFactory.runs[0].params.message, /- kind: photo/);
   assert.equal(
     await fs.readFile(path.join(scope.scopeDir, "photo--m11.jpg"), "utf8"),
     "jpg"
@@ -85,8 +86,9 @@ test("Claude sessions pass photo attachments as prompt path references", async (
   assert.equal(runnerFactory.runs.length, 1);
   assert.equal("imagePaths" in runnerFactory.runs[0].params, false);
   assert.match(runnerFactory.runs[0].params.message, /inspect/);
-  assert.match(runnerFactory.runs[0].params.message, /<attachments>/);
-  assert.match(runnerFactory.runs[0].params.message, /<attachment path=".*photo--m12\.jpg" kind="photo" \/>/);
+  assert.match(runnerFactory.runs[0].params.message, /Attached file:/);
+  assert.match(runnerFactory.runs[0].params.message, /- path: .*photo--m12\.jpg/);
+  assert.match(runnerFactory.runs[0].params.message, /- kind: photo/);
 });
 
 test("session builds attachment prompts for path-based files", async () => {
@@ -114,8 +116,9 @@ test("session builds attachment prompts for path-based files", async () => {
   assert.equal(runnerFactory.runs.length, 1);
   assert.equal("imagePaths" in runnerFactory.runs[0].params, false);
   assert.match(runnerFactory.runs[0].params.message, /review this/);
-  assert.match(runnerFactory.runs[0].params.message, /<attachments>/);
-  assert.match(runnerFactory.runs[0].params.message, /<attachment path=".*spec--m21\.pdf" kind="document" \/>/);
+  assert.match(runnerFactory.runs[0].params.message, /Attached file:/);
+  assert.match(runnerFactory.runs[0].params.message, /- path: .*spec--m21\.pdf/);
+  assert.match(runnerFactory.runs[0].params.message, /- kind: document/);
   assert.equal(await fs.readFile(path.join(scope.scopeDir, "spec--m21.pdf"), "utf8"), "pdf-bytes");
 });
 
@@ -180,8 +183,9 @@ test("session sanitizes original attachment filenames before caching", async () 
 
   assert.match(
     runnerFactory.runs[0].params.message,
-    /<attachment path=".*Quarterly-Report-final--m41\.pdf" kind="document" \/>/
+    /- path: .*Quarterly-Report-final--m41\.pdf/
   );
+  assert.match(runnerFactory.runs[0].params.message, /- kind: document/);
   assert.equal(
     await fs.readFile(path.join(scope.scopeDir, "Quarterly-Report-final--m41.pdf"), "utf8"),
     "safe"

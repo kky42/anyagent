@@ -450,9 +450,7 @@ test("final agent_message can send attachments declared in the XML output block"
       id: "item_2",
       type: "agent_message",
       text: [
-        "<attachments>",
-        '<attachment path="./artifacts/chart.png" />',
-        "</attachments>",
+        '<attachment path="./artifacts/chart.png" kind="photo" />',
         "",
         "Here is the chart."
       ].join("\n")
@@ -492,6 +490,80 @@ test("final agent_message can send attachments declared in the XML output block"
   ]);
 });
 
+test("final agent_message can send ATTACH paths with quotes and escaped spaces", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-output-"));
+  const desktopDir = path.join(tempDir, "Desktop");
+  const screenshotPath = path.join(desktopDir, "Screenshot 2026-05-30 at 01.33.06.png");
+  const secondPath = path.join(desktopDir, "Screenshot 2026-05-30 at 01.33.07.png");
+  await fs.mkdir(desktopDir, { recursive: true });
+  await fs.writeFile(screenshotPath, "png", "utf8");
+  await fs.writeFile(secondPath, "png", "utf8");
+
+  const { session, fakeBotApi, runnerFactory } = await createSession({
+    botConfig: {
+      workdir: tempDir
+    }
+  });
+
+  await session.enqueueMessage("first");
+  const run = runnerFactory.runs[0];
+  await run.emit({
+    type: "item.completed",
+    item: {
+      type: "agent_message",
+      text: [
+        `ATTACH "${screenshotPath}"`,
+        `ATTACH ${secondPath.replaceAll(" ", "\\ ")}`
+      ].join("\n")
+    }
+  });
+  run.finish();
+
+  await flush();
+  await flush();
+
+  assert.deepEqual(fakeBotApi.messages, []);
+  assert.deepEqual(fakeBotApi.attachments, [
+    {
+      chatId: 1001,
+      kind: "photo",
+      filePath: screenshotPath,
+      fileName: "Screenshot 2026-05-30 at 01.33.06.png"
+    },
+    {
+      chatId: 1001,
+      kind: "photo",
+      filePath: secondPath,
+      fileName: "Screenshot 2026-05-30 at 01.33.07.png"
+    }
+  ]);
+});
+
+test("private final agent_message leaves group message blocks literal", async () => {
+  const { session, fakeBotApi, runnerFactory } = await createSession();
+
+  await session.enqueueMessage("first");
+  const run = runnerFactory.runs[0];
+  await run.emit({
+    type: "item.completed",
+    item: {
+      type: "agent_message",
+      text: "<group_message><![CDATA[private text]]></group_message>"
+    }
+  });
+  run.finish();
+  await flush();
+  await flush();
+
+  assert.deepEqual(fakeBotApi.messages, [
+    {
+      chatId: 1001,
+      text: "<group_message><![CDATA[private text]]></group_message>",
+      parseMode: "HTML"
+    }
+  ]);
+});
+
 test("attachment-only final agent_message deletes the transient progress message", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-output-"));
   const reportPath = path.join(tempDir, "report.pdf");
@@ -520,9 +592,7 @@ test("attachment-only final agent_message deletes the transient progress message
       id: "item_2",
       type: "agent_message",
       text: [
-        "<attachments>",
-        '<attachment path="./report.pdf" kind="document" />',
-        "</attachments>"
+        '<attachment path="./report.pdf" kind="document" />'
       ].join("\n")
     }
   });
@@ -581,14 +651,10 @@ test("multiple control blocks preserve text, attachment, and error order", async
       type: "agent_message",
       text: [
         "Before",
-        "<attachments>",
-        '<attachment path="./chart.png" />',
-        "</attachments>",
+        '<attachment path="./chart.png" kind="photo" />',
         "Between",
-        "<attachments>",
         '<attachment path="./missing.pdf" kind="document" />',
         '<attachment path="./report.pdf" kind="document" />',
-        "</attachments>",
         "After"
       ].join("\n")
     }
@@ -673,9 +739,7 @@ test("oversized outbound attachments become inline errors without sending", asyn
       id: "item_2",
       type: "agent_message",
       text: [
-        "<attachments>",
-        '<attachment path="./large.bin" kind="document" />',
-        "</attachments>"
+        '<attachment path="./large.bin" kind="document" />'
       ].join("\n")
     }
   });
@@ -690,6 +754,59 @@ test("oversized outbound attachments become inline errors without sending", asyn
       chatId: 1001,
       messageId: 1,
       text: "Attachment error: path=./large.bin; kind=document; reason=file exceeds the 50 MB limit",
+      parseMode: "HTML"
+    }
+  ]);
+});
+
+test("group turns suppress progress and raw text while rendering group control blocks", async () => {
+  const { session, fakeBotApi, runnerFactory } = await createSession();
+
+  await session.enqueueTurn({
+    mode: "group",
+    groupInput: {
+      messages: ["[2026-05-31 15:31:20] Alice (@alice):\nhello"]
+    },
+    groupIdentity: {
+      botName: "Relay Bot",
+      botHandle: "@relaybot"
+    }
+  });
+  const run = runnerFactory.runs[0];
+
+  await run.emit({
+    type: "item.started",
+    item: {
+      id: "item_1",
+      type: "reasoning",
+      status: "in_progress"
+    }
+  });
+  await run.emit({
+    type: "item.completed",
+    item: {
+      id: "item_2",
+      type: "agent_message",
+      text: [
+        "raw text that should not be sent",
+        "<group_message><![CDATA[Visible group reply]]></group_message>",
+        '<attachment path="./missing.png" kind="photo" />'
+      ].join("\n")
+    }
+  });
+  run.finish();
+  await flush();
+  await flush();
+
+  assert.deepEqual(fakeBotApi.messages, [
+    {
+      chatId: 1001,
+      text: "Visible group reply",
+      parseMode: "HTML"
+    },
+    {
+      chatId: 1001,
+      text: "Attachment error: path=./missing.png; kind=photo; reason=file not found",
       parseMode: "HTML"
     }
   ]);

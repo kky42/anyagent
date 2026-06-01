@@ -9,7 +9,8 @@ import { createControlledRunnerFactory, FakeConfigStore } from "./support/fakes.
 import { flush } from "./support/async.js";
 
 class FakeMattermostApi {
-  constructor({ failEditOnce = false } = {}) {
+  constructor({ failCreatePostTimes = 0, failEditOnce = false } = {}) {
+    this.failCreatePostTimes = failCreatePostTimes;
     this.failEditOnce = failEditOnce;
     this.posts = [];
     this.updates = [];
@@ -20,6 +21,10 @@ class FakeMattermostApi {
   }
 
   async createPost(payload) {
+    if (this.failCreatePostTimes > 0) {
+      this.failCreatePostTimes -= 1;
+      throw new TypeError("fetch failed");
+    }
     this.posts.push(payload);
     return { id: `post-${this.nextPostId++}` };
   }
@@ -133,6 +138,30 @@ test("Mattermost renderer sends raw Markdown and edits progress into final text"
   ]);
 });
 
+test("Mattermost renderer retries transient createPost fetch failures", async () => {
+  const botApi = new FakeMattermostApi({ failCreatePostTimes: 1 });
+  const { session } = await createMattermostSession({ botApi });
+
+  await session.renderGroupFinalMessage(
+    [
+      "REPLY @alice",
+      "Here is the table:",
+      "",
+      "| a | b |",
+      "| - | - |",
+      "| 1 | 2 |"
+    ].join("\n")
+  );
+
+  assert.deepEqual(botApi.posts, [
+    {
+      channelId: "channel1",
+      message: "@alice Here is the table:\n\n| a | b |\n| - | - |\n| 1 | 2 |",
+      rootId: null
+    }
+  ]);
+});
+
 test("Mattermost renderer degrades to a new post if final edit fails", async () => {
   const botApi = new FakeMattermostApi({ failEditOnce: true });
   const { session, runnerFactory } = await createMattermostSession({ botApi });
@@ -167,7 +196,7 @@ test("Mattermost renderer uploads outbound attachment blocks", async () => {
   const filePath = path.join(tempDir, "report.txt");
   await fs.writeFile(filePath, "report", "utf8");
 
-  await session.renderFinalMessage(`<attachments>\n<attachment path="${filePath}" kind="document" />\n</attachments>`, {
+  await session.renderFinalMessage(`<attachment path="${filePath}" kind="document" />`, {
     workdir: tempDir,
     replyTarget: { rootId: "root1" }
   });
@@ -181,6 +210,53 @@ test("Mattermost renderer uploads outbound attachment blocks", async () => {
       message: "",
       rootId: "root1",
       fileIds: ["file-1"]
+    }
+  ]);
+});
+
+test("Mattermost renderer uploads ATTACH paths with quotes and escaped spaces", async () => {
+  const { session, botApi } = await createMattermostSession();
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-mm-output-"));
+  const screenshotPath = path.join(tempDir, "Screenshot 2026-05-30 at 01.33.06.png");
+  const secondPath = path.join(tempDir, "Screenshot 2026-05-30 at 01.33.07.png");
+  await fs.writeFile(screenshotPath, "png", "utf8");
+  await fs.writeFile(secondPath, "png", "utf8");
+
+  await session.renderFinalMessage(
+    [
+      `ATTACH "${screenshotPath}"`,
+      `ATTACH ${secondPath.replaceAll(" ", "\\ ")}`
+    ].join("\n"),
+    {
+      workdir: tempDir,
+      replyTarget: { rootId: "root1" }
+    }
+  );
+
+  assert.deepEqual(
+    botApi.uploads.map((upload) => upload.filePath),
+    [screenshotPath, secondPath]
+  );
+  assert.deepEqual(botApi.posts, [
+    {
+      channelId: "channel1",
+      message: "",
+      rootId: "root1",
+      fileIds: ["file-1", "file-2"]
+    }
+  ]);
+});
+
+test("Mattermost private renderer leaves group message blocks literal", async () => {
+  const { session, botApi } = await createMattermostSession();
+
+  await session.renderFinalMessage("<group_message><![CDATA[private text]]></group_message>");
+
+  assert.deepEqual(botApi.posts, [
+    {
+      channelId: "channel1",
+      message: "<group_message><![CDATA[private text]]></group_message>",
+      rootId: null
     }
   ]);
 });

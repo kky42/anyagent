@@ -80,6 +80,11 @@ export function eventToActions(event) {
   switch (event.type) {
     case "session":
       return [{ kind: "session_started", sessionId: event.id ?? null }];
+    case "message_start":
+      if (!isRecord(event.message) || event.message.role !== "assistant") {
+        return [];
+      }
+      return [{ kind: "progress", text: "reasoning" }];
     case "message_end": {
       if (!isRecord(event.message) || event.message.role !== "assistant") {
         return [];

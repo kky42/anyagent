@@ -1,5 +1,6 @@
 export async function prepareForSessionReset(session) {
   session.queue = [];
+  session.groupRootIncluded = false;
   await session.abortCurrentRun();
   session.stopTyping();
   session.resetTransientTurnState();

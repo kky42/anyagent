@@ -25,6 +25,10 @@ test("fixture events emit the final assistant message only after message_end", a
       sessionId: "019e227d-4508-74ed-acd1-9d990c98b99d"
     },
     {
+      kind: "progress",
+      text: "reasoning"
+    },
+    {
       kind: "context_length",
       contextLength: 1519
     },
@@ -41,6 +45,21 @@ test("fixture events emit the final assistant message only after message_end", a
     },
     {
       kind: "turn_completed"
+    }
+  ]);
+});
+
+test("assistant message starts become reasoning progress actions", () => {
+  assert.deepEqual(eventToActions({
+    type: "message_start",
+    message: {
+      role: "assistant",
+      content: []
+    }
+  }), [
+    {
+      kind: "progress",
+      text: "reasoning"
     }
   ]);
 });
