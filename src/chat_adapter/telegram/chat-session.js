@@ -8,6 +8,7 @@ import {
 } from "../common/attachments.js";
 import { ChatSession as CommonChatSession } from "../common/chat-session.js";
 import { ensureCacheScope } from "../common/cache-scope.js";
+import { appendReferenceContext } from "../common/reference-context.js";
 import { DEFAULT_CACHE_PATH, toErrorMessage } from "../../utils.js";
 import {
   attachmentDescriptorFromMessage,
@@ -62,6 +63,8 @@ export class ChatSession extends CommonChatSession {
     chatId,
     conversationId = chatId,
     cacheRootDir = DEFAULT_CACHE_PATH,
+    stateStore = null,
+    deliveryAnchor = null,
     createAgentRun = null,
     createCodexRun = null,
     resolveContextLength = null,
@@ -77,6 +80,8 @@ export class ChatSession extends CommonChatSession {
       bindingId: botConfig.username,
       conversationId,
       cacheRootDir,
+      stateStore,
+      deliveryAnchor,
       createAgentRun,
       createCodexRun,
       resolveContextLength,
@@ -226,7 +231,7 @@ export class ChatSession extends CommonChatSession {
     }
   }
 
-  async handleAttachmentMessages(messages) {
+  async handleAttachmentMessages(messages, options = {}) {
     if (!Array.isArray(messages) || messages.length === 0) {
       return;
     }
@@ -234,6 +239,9 @@ export class ChatSession extends CommonChatSession {
 
     try {
       const turn = await this.buildAttachmentTurn(messages);
+      if (options.referenceText) {
+        turn.promptText = appendReferenceContext(turn.promptText, options.referenceText);
+      }
       turn.replyTarget = replyTarget;
       await this.enqueueTurn(turn);
     } catch (error) {

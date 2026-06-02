@@ -1,3 +1,9 @@
+export const PRIVATE_ALLOWED_USER_COMMANDS = new Set(["status", "new", "schedule"]);
+
+export function allowedInPrivateForAllowedUser(command) {
+  return PRIVATE_ALLOWED_USER_COMMANDS.has(String(command ?? "").trim().toLowerCase());
+}
+
 export async function routeCommandOrTurn({
   command,
   args = "",
@@ -33,6 +39,9 @@ export async function routeCommandOrTurn({
       return;
     case "new":
       await session.handleNewSession({ replyTarget });
+      return;
+    case "schedule":
+      await runtime.handleScheduleCommand(session, args, { replyTarget });
       return;
     case "reset":
       await session.handleReset({ replyTarget });
@@ -80,6 +89,9 @@ export async function routeKnownCommand({
       return true;
     case "new":
       await session.handleNewSession({ replyTarget });
+      return true;
+    case "schedule":
+      await runtime.handleScheduleCommand(session, args, { replyTarget });
       return true;
     case "reset":
       await session.handleReset({ replyTarget });

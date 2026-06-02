@@ -6,9 +6,9 @@ export async function prepareForSessionReset(session) {
   session.resetTransientTurnState();
 }
 
-export async function resetSession(session, { clearPersistedState = false } = {}) {
+export async function resetSession(session, { clearSessionState = false } = {}) {
   await prepareForSessionReset(session);
-  if (clearPersistedState) {
-    await session.clearPersistedState();
+  if (clearSessionState) {
+    await session.clearSessionState();
   }
 }

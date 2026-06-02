@@ -1,4 +1,28 @@
-import { DEFAULT_CACHE_PATH, sleep, toErrorMessage } from "../../utils.js";
+import path from "node:path";
+
+import { buildTurnInputMessage } from "../../cli_adapter/turn-input.js";
+import {
+  DEFAULT_CACHE_PATH,
+  formatLocalTimestamp,
+  sleep,
+  toErrorMessage
+} from "../../utils.js";
+import {
+  allowedInPrivateForAllowedUser
+} from "../common/command-router.js";
+import { ConversationStateStore } from "../common/conversation-state.js";
+import { appendReferenceContext } from "../common/reference-context.js";
+import {
+  buildBackgroundNotificationText,
+  buildHeartbeatGroupTranscriptMessage,
+  buildHeartbeatPrivatePrompt,
+  buildScheduleConfirmation,
+  buildScheduleListText,
+  describeNextSchedule,
+  parseScheduleAddArgs,
+  parseScheduleMutationArgs,
+  scheduleCommandHelp
+} from "../common/schedules.js";
 import { NOOP_CONFIG_STORE } from "../common/session-persistence.js";
 import { resetSession } from "../common/session-reset.js";
 import { ChatSession, replyTargetFromMattermostPost } from "./chat-session.js";
@@ -51,6 +75,17 @@ function channelLikeConversationId(post) {
   return rootId ? `${channelId}:thread:${rootId}` : channelId;
 }
 
+function deliveryAnchorFromMattermostPost(post) {
+  const channelId = String(post?.channel_id ?? "").trim();
+  if (!channelId) {
+    return null;
+  }
+  return {
+    channelId,
+    replyTarget: replyTargetFromMattermostPost(post)
+  };
+}
+
 export class BotRuntime {
   constructor({
     botConfig,
@@ -61,6 +96,7 @@ export class BotRuntime {
     createAgentRun = null,
     createCodexRun = null,
     cacheRootDir = DEFAULT_CACHE_PATH,
+    stateRootDir = null,
     watchdogIntervalMs = DEFAULT_WATCHDOG_INTERVAL_MS,
     staleWebSocketMs = DEFAULT_STALE_WEBSOCKET_MS
   }) {
@@ -75,6 +111,9 @@ export class BotRuntime {
     });
     this.createAgentRun = createAgentRun ?? createCodexRun;
     this.cacheRootDir = cacheRootDir;
+    this.stateStore = new ConversationStateStore({
+      rootDir: stateRootDir || path.join(path.dirname(cacheRootDir), "state")
+    });
     this.botUsername = null;
     this.botUserId = null;
     this.botDisplayName = "AnyAgent";
@@ -90,6 +129,8 @@ export class BotRuntime {
     this.stopRequested = false;
     this.connectPromise = null;
     this.pendingWebSocket = null;
+    this.scheduleTimers = new Map();
+    this.activeBackgroundRuns = new Set();
     this.lastWsOpenAt = null;
     this.lastWsActivityAt = null;
     this.lastWsMessageAt = null;
@@ -117,11 +158,316 @@ export class BotRuntime {
         conversationId,
         websocket: this.websocket,
         cacheRootDir: this.cacheRootDir,
+        stateStore: this.stateStore,
+        deliveryAnchor: options.deliveryAnchor ?? null,
         createAgentRun: this.createAgentRun
       });
       this.sessions.set(key, session);
+    } else if (options.deliveryAnchor) {
+      void session.updateDeliveryAnchor(options.deliveryAnchor).catch((error) => {
+        this.log(`${key}: failed to persist delivery anchor: ${toErrorMessage(error)}`);
+      });
     }
     return session;
+  }
+
+  scheduleKey(conversationId, scheduleName) {
+    return `${conversationId}::${scheduleName}`;
+  }
+
+  clearConversationScheduleTimers(conversationId) {
+    const prefix = `${conversationId}::`;
+    for (const [key, timer] of this.scheduleTimers.entries()) {
+      if (!key.startsWith(prefix)) {
+        continue;
+      }
+      clearTimeout(timer);
+      this.scheduleTimers.delete(key);
+    }
+  }
+
+  syncConversationSchedules(session) {
+    this.clearConversationScheduleTimers(session.conversationId);
+
+    for (const schedule of session.schedules) {
+      if (schedule.enabled === false) {
+        continue;
+      }
+
+      try {
+        const next = describeNextSchedule(schedule);
+        const delayMs = Math.max(0, next.getTime() - Date.now());
+        const key = this.scheduleKey(session.conversationId, schedule.name);
+        const timer = setTimeout(() => {
+          void this.handleScheduledOccurrence(session.conversationId, schedule.name);
+        }, delayMs);
+        timer.unref?.();
+        this.scheduleTimers.set(key, timer);
+      } catch (error) {
+        this.log(
+          `invalid scheduled cron for ${session.conversationId}/${schedule.name}: ${toErrorMessage(error)}`
+        );
+      }
+    }
+  }
+
+  async restoreScheduledConversations() {
+    const records = await this.stateStore.loadBindingRecords(
+      {
+        agentId: this.botConfig.agent.id,
+        platform: "mattermost",
+        bindingId: this.botConfig.bindingId
+      },
+      {
+        onError: (error, details) => {
+          this.log(`failed to load conversation state from ${details.stateJsonPath}: ${toErrorMessage(error)}`);
+        }
+      }
+    );
+
+    for (const { scope, record } of records) {
+      if (!Array.isArray(record.schedules) || record.schedules.length === 0) {
+        continue;
+      }
+
+      const channelId = String(record.deliveryAnchor?.channelId ?? "").trim();
+      if (!channelId) {
+        this.log(`skipping scheduled restore for ${scope.conversationId}: missing delivery anchor`);
+        continue;
+      }
+
+      const session = this.sessionFor(channelId, {
+        conversationId: scope.conversationId,
+        deliveryAnchor: record.deliveryAnchor
+      });
+      this.syncConversationSchedules(session);
+    }
+  }
+
+  async loadReferencePost(post) {
+    const rootId = String(post?.root_id ?? "").trim();
+    if (!rootId) {
+      return null;
+    }
+
+    try {
+      const referencePost = await this.botApi.getPost(rootId);
+      return await this.enrichPost(referencePost);
+    } catch {
+      return null;
+    }
+  }
+
+  async buildPrivateReferenceText(session, post) {
+    const referencePost = await this.loadReferencePost(post);
+    if (!referencePost) {
+      return "";
+    }
+
+    const attachments = await session.stageInputAttachmentsFromPost(referencePost);
+    return buildTurnInputMessage({
+      promptText: normalizedPostText(referencePost).trim(),
+      attachments
+    }).trim();
+  }
+
+  async buildGroupReferenceText(session, post) {
+    const referencePost = await this.loadReferencePost(post);
+    if (!referencePost) {
+      return "";
+    }
+
+    const attachments = await session.stageInputAttachmentsFromPost(referencePost);
+    return renderGroupInputPost(referencePost, attachments);
+  }
+
+  async runHeartbeatSchedule(session, schedule, now = new Date()) {
+    const deliveryAnchor = session.deliveryAnchor ?? { channelId: session.channelId, replyTarget: null };
+    const channel = await this.channelFor(deliveryAnchor?.channelId ?? session.channelId);
+
+    if (this.isDirectChannel(channel)) {
+      await session.enqueueTurn({
+        promptText: buildHeartbeatPrivatePrompt(schedule.name, schedule.prompt),
+        replyTarget: deliveryAnchor?.replyTarget ?? null,
+        scheduleName: schedule.name,
+        suppressQueueNotice: true
+      });
+      return;
+    }
+
+    await session.enqueueTurn({
+      mode: "group",
+      groupInput: {
+        messages: [buildHeartbeatGroupTranscriptMessage(schedule.name, schedule.prompt, now)]
+      },
+      groupIdentity: this.groupIdentity(),
+      replyTarget: deliveryAnchor?.replyTarget ?? null,
+      scheduleName: schedule.name,
+      suppressQueueNotice: true
+    });
+  }
+
+  async runBackgroundSchedule(session, schedule, now = new Date()) {
+    const deliveryAnchor = session.deliveryAnchor ?? { channelId: session.channelId, replyTarget: null };
+    const cliAdapter = session.cliAdapter;
+    const triggeredAt = formatLocalTimestamp(Math.floor(now.getTime() / 1000));
+    const messageParts = [];
+    let failureText = null;
+
+    const run = session.createAgentRun({
+      cli: session.cli,
+      workdir: session.workdir,
+      sessionId: null,
+      message: schedule.prompt,
+      autoMode: session.auto,
+      model: session.model,
+      reasoningEffort: session.reasoningEffort,
+      developerInstructions: null,
+      onEvent: async (event) => {
+        const actions = cliAdapter.eventToActions(event);
+        for (const action of actions) {
+          if (action.kind === "message") {
+            if (String(action.text ?? "").trim()) {
+              messageParts.push(String(action.text));
+            }
+            continue;
+          }
+          if (action.kind === "error" && !failureText) {
+            failureText = action.text;
+          }
+        }
+      },
+      onStdErr: (chunk) => {
+        const stderrText = String(chunk ?? "").trim();
+        if (stderrText) {
+          session.logger(`${cliAdapter.id} background stderr: ${stderrText}`);
+        }
+      }
+    });
+    this.activeBackgroundRuns.add(run);
+
+    try {
+      const result = await run.done;
+      if (result.aborted) {
+        return;
+      }
+
+      if (!failureText && !result.sawTerminalEvent) {
+        failureText = `${cliAdapter.displayName} exited without a terminal JSON event.`;
+      }
+    } catch (error) {
+      failureText = `${cliAdapter.displayName} process error: ${toErrorMessage(error)}`;
+    } finally {
+      this.activeBackgroundRuns.delete(run);
+    }
+
+    await session.sendText(
+      buildBackgroundNotificationText({
+        scheduleName: schedule.name,
+        triggeredAt,
+        failed: Boolean(failureText),
+        body: failureText ?? messageParts.join("\n\n")
+      }),
+      {
+        replyTarget: deliveryAnchor?.replyTarget ?? null
+      }
+    );
+  }
+
+  async handleScheduledOccurrence(conversationId, scheduleName) {
+    const session = this.sessions.get(String(conversationId));
+    if (!session) {
+      return;
+    }
+
+    this.scheduleTimers.delete(this.scheduleKey(conversationId, scheduleName));
+    const schedule = session.schedules.find((candidate) => candidate.name === scheduleName);
+    if (!schedule || schedule.enabled === false) {
+      return;
+    }
+
+    try {
+      if (schedule.mode === "background") {
+        await this.runBackgroundSchedule(session, schedule);
+      } else {
+        await this.runHeartbeatSchedule(session, schedule);
+      }
+    } catch (error) {
+      this.log(`scheduled run "${scheduleName}" failed in ${conversationId}: ${toErrorMessage(error)}`);
+    } finally {
+      this.syncConversationSchedules(session);
+    }
+  }
+
+  async handleScheduleCommand(session, args, options = {}) {
+    const trimmedArgs = String(args ?? "").trim();
+    if (!trimmedArgs) {
+      await session.sendText(scheduleCommandHelp("!schedule"), options);
+      return;
+    }
+
+    const action = trimmedArgs.split(/\s+/, 1)[0]?.toLowerCase();
+    const schedules = session.schedules;
+
+    try {
+      if (action === "list") {
+        await session.sendText(buildScheduleListText(schedules), options);
+        return;
+      }
+
+      if (action === "add") {
+        const schedule = parseScheduleAddArgs(trimmedArgs);
+        if (schedules.some((candidate) => candidate.name === schedule.name)) {
+          throw new Error(`Schedule "${schedule.name}" already exists.`);
+        }
+        await session.replaceSchedules([...schedules, { ...schedule, enabled: true }]);
+        this.syncConversationSchedules(session);
+        await session.sendText(buildScheduleConfirmation("Added", schedule), options);
+        return;
+      }
+
+      if (action === "remove") {
+        const name = parseScheduleMutationArgs(trimmedArgs, "remove");
+        const schedule = schedules.find((candidate) => candidate.name === name);
+        if (!schedule) {
+          throw new Error(`Schedule "${name}" does not exist.`);
+        }
+        await session.replaceSchedules(schedules.filter((candidate) => candidate.name !== name));
+        session.removeQueuedScheduledTurns(name);
+        this.syncConversationSchedules(session);
+        await session.sendText(buildScheduleConfirmation("Removed", schedule), options);
+        return;
+      }
+
+      if (action === "enable" || action === "disable") {
+        const name = parseScheduleMutationArgs(trimmedArgs, action);
+        const schedule = schedules.find((candidate) => candidate.name === name);
+        if (!schedule) {
+          throw new Error(`Schedule "${name}" does not exist.`);
+        }
+        const enabled = action === "enable";
+        const nextSchedules = schedules.map((candidate) =>
+          candidate.name === name ? { ...candidate, enabled } : candidate
+        );
+        await session.replaceSchedules(nextSchedules);
+        if (!enabled) {
+          session.removeQueuedScheduledTurns(name);
+        }
+        this.syncConversationSchedules(session);
+        await session.sendText(
+          buildScheduleConfirmation(enabled ? "Enabled" : "Disabled", {
+            ...schedule,
+            enabled
+          }),
+          options
+        );
+        return;
+      }
+
+      await session.sendText(scheduleCommandHelp("!schedule"), options);
+    } catch (error) {
+      await session.sendText(toErrorMessage(error), options);
+    }
   }
 
   async channelFor(channelId) {
@@ -172,6 +518,9 @@ export class BotRuntime {
   }
 
   hasPendingBotWork() {
+    if (this.activeBackgroundRuns.size > 0) {
+      return true;
+    }
     for (const session of this.sessions.values()) {
       if (session.isRunning || session.queue.length > 0) {
         return true;
@@ -210,6 +559,7 @@ export class BotRuntime {
       );
     }
     this.log(`ready as @${this.botUsername} for agent ${this.botConfig.agent.id} with workdir ${this.botConfig.agent.workdir}`);
+    await this.restoreScheduledConversations();
   }
 
   groupIdentity() {
@@ -222,12 +572,17 @@ export class BotRuntime {
 
   async resetSessions() {
     await Promise.all([...this.sessions.values()].map((session) =>
-      resetSession(session, { clearPersistedState: true })
+      resetSession(session, { clearSessionState: true })
     ));
   }
 
   async sendDirectMessage(channelId, text) {
-    const session = this.sessionFor(channelId);
+    const session = this.sessionFor(channelId, {
+      deliveryAnchor: {
+        channelId,
+        replyTarget: null
+      }
+    });
     await session.sendText(text);
   }
 
@@ -281,7 +636,10 @@ export class BotRuntime {
     if (parsedCommand?.ignored && !isDirect) {
       return;
     }
-    const session = this.sessionFor(platformChannelId, { conversationId });
+    const session = this.sessionFor(platformChannelId, {
+      conversationId,
+      deliveryAnchor: deliveryAnchorFromMattermostPost(post)
+    });
 
     if (isDirect && !this.isAuthorized({ username: post?.user?.username ?? post?.username })) {
       await session.sendText(unauthorizedMessage(post?.user), {
@@ -300,7 +658,8 @@ export class BotRuntime {
     }
 
     if (hasSupportedAttachment(post) && isDirect) {
-      await session.handleAttachmentPosts([post]);
+      const referenceText = await this.buildPrivateReferenceText(session, post);
+      await session.handleAttachmentPosts([post], { referenceText });
       return;
     }
 
@@ -312,7 +671,10 @@ export class BotRuntime {
     }
 
     if (isCommandLike) {
-      if (!this.isManager({ username: post?.user?.username ?? post?.username })) {
+      if (
+        !this.isManager({ username: post?.user?.username ?? post?.username }) &&
+        !(isDirect && allowedInPrivateForAllowedUser(parsedCommand.command))
+      ) {
         await session.sendText(COMMAND_REJECTION_UNAUTHORIZED, { replyTarget });
         return;
       }
@@ -329,7 +691,10 @@ export class BotRuntime {
     }
 
     if (isDirect) {
-      await session.enqueueMessage(text, { replyTarget });
+      await session.enqueueMessage(
+        appendReferenceContext(text, await this.buildPrivateReferenceText(session, post)),
+        { replyTarget }
+      );
       return;
     }
 
@@ -340,29 +705,14 @@ export class BotRuntime {
     if (!normalizedPostText(post).trim() && !hasSupportedAttachment(post)) {
       return;
     }
-
-    const referencePost = post.root_id
-      ? await this.botApi.getPost(post.root_id).then((rootPost) => this.enrichPost(rootPost)).catch(() => null)
-      : null;
-    const posts = [];
-    let includesRoot = false;
-    if (referencePost && session.shouldIncludeGroupRoot()) {
-      posts.push(referencePost);
-      includesRoot = true;
-    }
-    posts.push(post);
-
-    const renderedMessages = [];
-    for (const candidate of posts) {
-      const attachments = await session.stageInputAttachmentsFromPost(candidate);
-      renderedMessages.push(renderGroupInputPost(candidate, attachments));
-    }
+    const attachments = await session.stageInputAttachmentsFromPost(post);
+    const renderedMessage = renderGroupInputPost(post, attachments);
+    const referenceText = await this.buildGroupReferenceText(session, post);
 
     await session.enqueueTurn({
       mode: "group",
       groupInput: {
-        includesRoot,
-        messages: renderedMessages
+        messages: [appendReferenceContext(renderedMessage, referenceText)]
       },
       mergeKey: "group",
       groupIdentity: this.groupIdentity(),
@@ -532,6 +882,15 @@ export class BotRuntime {
     this.pendingWebSocket = null;
     this.websocket?.close?.();
     this.websocket = null;
+    for (const timer of this.scheduleTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.scheduleTimers.clear();
+    const backgroundRuns = [...this.activeBackgroundRuns];
+    for (const run of backgroundRuns) {
+      run.abort?.();
+    }
+    await Promise.allSettled(backgroundRuns.map((run) => run.done.catch(() => null)));
     for (const session of this.sessions.values()) {
       session.queue = [];
       session.stopTyping();

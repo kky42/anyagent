@@ -279,7 +279,7 @@ test("runtime rejects unknown private slash commands without starting an agent r
   assert.equal(fakeBotApi.messages.at(-1).text, "Unknown command.");
 });
 
-test("runtime lets allowed non-manager users send private prompts but not commands", async () => {
+test("runtime lets allowed non-manager users send private prompts and basic private commands", async () => {
   const { runtime, fakeBotApi, runnerFactory } = await createRuntime({
     botConfig: {
       allowedUsernames: ["alloweduser", "owner"],
@@ -292,7 +292,7 @@ test("runtime lets allowed non-manager users send private prompts but not comman
 
   assert.equal(runnerFactory.runs.length, 1);
   assert.equal(runnerFactory.runs[0].params.message, "please inspect this stack trace");
-  assert.equal(fakeBotApi.messages.at(-1).text, "Only manager users can run AnyAgent commands.");
+  assert.match(fakeBotApi.messages.at(-1).text, /^running: yes|^running: no/);
   runnerFactory.runs[0].finish();
 });
 
@@ -422,6 +422,29 @@ test("runtime routes first private topic message without quoting it", async () =
     directMessagesTopicId: 11,
     messageThreadId: 11
   });
+});
+
+test("runtime appends Telegram private reply context after the new message", async () => {
+  const { runtime, runnerFactory } = await createRuntime();
+
+  await runtime.handleMessage(
+    buildTextMessage("follow up", "AllowedUser", 1001, {
+      message_id: 2,
+      reply_to_message: {
+        message_id: 1,
+        chat: { id: 1001, type: "private" },
+        from: { id: 42, username: "AllowedUser" },
+        text: "previous question"
+      }
+    })
+  );
+
+  assert.equal(runnerFactory.runs.length, 1);
+  assert.equal(
+    runnerFactory.runs[0].params.message,
+    "follow up\n\nReference context:\nprevious question"
+  );
+  runnerFactory.runs[0].finish();
 });
 
 test("runtime sends every group message and silently coalesces pending group turns", async () => {

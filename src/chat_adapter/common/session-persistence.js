@@ -1,8 +1,7 @@
-import { AUTO_DEFAULT } from "../../auto-mode.js";
 import {
-  DEFAULT_MODEL,
-  DEFAULT_REASONING_EFFORT
-} from "../../runtime-settings.js";
+  ConversationState,
+  ConversationStateStore
+} from "./conversation-state.js";
 
 export const NOOP_CONFIG_STORE = {
   async loadChatBindingConfig() {
@@ -10,112 +9,118 @@ export const NOOP_CONFIG_STORE = {
   }
 };
 
-function applyObjectPatch(target, patch) {
-  for (const [key, value] of Object.entries(patch)) {
-    if (value === undefined) {
-      delete target[key];
-    } else {
-      target[key] = value;
-    }
-  }
-}
-
-function runtimeStateFromAgent(agent) {
-  return {
-    sessionId: null,
-    contextLength: null,
-    cli: agent?.cli,
-    workdir: agent?.workdir,
-    auto: agent?.auto ?? AUTO_DEFAULT,
-    model: agent?.model ?? DEFAULT_MODEL,
-    reasoningEffort: agent?.reasoningEffort ?? DEFAULT_REASONING_EFFORT
-  };
-}
-
 export class SessionPersistence {
-  constructor({ bindingConfig, botConfig = null }) {
-    this.bindingConfig = bindingConfig ?? botConfig;
-    this.state = runtimeStateFromAgent(this.bindingConfig?.agent);
+  static loadSync({
+    bindingConfig,
+    platform,
+    bindingId,
+    conversationId,
+    deliveryAnchor = null,
+    stateStore = new ConversationStateStore(),
+    logger = () => {}
+  }) {
+    const conversationState = ConversationState.loadSync({
+      bindingConfig,
+      platform,
+      bindingId,
+      conversationId,
+      deliveryAnchor,
+      stateStore,
+      logger
+    });
+    return new SessionPersistence({ conversationState });
+  }
+
+  static async load({
+    bindingConfig,
+    platform,
+    bindingId,
+    conversationId,
+    deliveryAnchor = null,
+    stateStore = new ConversationStateStore(),
+    logger = () => {}
+  }) {
+    const conversationState = await ConversationState.load({
+      bindingConfig,
+      platform,
+      bindingId,
+      conversationId,
+      deliveryAnchor,
+      stateStore,
+      logger
+    });
+    return new SessionPersistence({ conversationState });
+  }
+
+  constructor({ conversationState }) {
+    this.conversationState = conversationState;
   }
 
   get sessionId() {
-    return this.state.sessionId;
-  }
-
-  set sessionId(sessionId) {
-    this.state.sessionId = sessionId;
+    return this.conversationState.sessionId;
   }
 
   get contextLength() {
-    return this.state.contextLength;
-  }
-
-  set contextLength(contextLength) {
-    this.state.contextLength = contextLength;
+    return this.conversationState.contextLength;
   }
 
   get cli() {
-    return this.state.cli;
-  }
-
-  set cli(cli) {
-    this.state.cli = cli;
+    return this.conversationState.cli;
   }
 
   get workdir() {
-    return this.state.workdir;
-  }
-
-  set workdir(workdir) {
-    this.state.workdir = workdir;
+    return this.conversationState.workdir;
   }
 
   get auto() {
-    return this.state.auto;
-  }
-
-  set auto(auto) {
-    this.state.auto = auto;
+    return this.conversationState.auto;
   }
 
   get model() {
-    return this.state.model;
-  }
-
-  set model(model) {
-    this.state.model = model;
+    return this.conversationState.model;
   }
 
   get reasoningEffort() {
-    return this.state.reasoningEffort;
+    return this.conversationState.reasoningEffort;
   }
 
-  set reasoningEffort(reasoningEffort) {
-    this.state.reasoningEffort = reasoningEffort;
+  get schedules() {
+    return this.conversationState.schedules;
+  }
+
+  get deliveryAnchor() {
+    return this.conversationState.deliveryAnchor;
+  }
+
+  async updateDeliveryAnchor(deliveryAnchor) {
+    await this.conversationState.updateDeliveryAnchor(deliveryAnchor);
   }
 
   async updateSessionId(sessionId) {
-    this.sessionId = sessionId;
+    await this.conversationState.updateSessionId(sessionId);
   }
 
   async updateContextLength(contextLength) {
-    this.contextLength = contextLength;
+    await this.conversationState.updateContextLength(contextLength);
   }
 
-  async clearPersistedState() {
-    this.sessionId = null;
-    this.contextLength = null;
+  async clearSessionState() {
+    await this.conversationState.clearSessionState();
   }
 
   async resetChatToBindingDefaults() {
-    this.state = runtimeStateFromAgent(this.bindingConfig?.agent);
+    await this.conversationState.resetChatToBindingDefaults();
   }
 
   async resetChatToBotDefaults() {
-    await this.resetChatToBindingDefaults();
+    await this.conversationState.resetChatToBotDefaults();
   }
 
   async applyRuntimeSettings(patch) {
-    applyObjectPatch(this.state, patch);
+    await this.conversationState.applyRuntimeSettings(patch);
+  }
+
+  async replaceSchedules(schedules) {
+    await this.conversationState.replaceSchedules(schedules);
   }
 }

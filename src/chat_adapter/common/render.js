@@ -1,5 +1,7 @@
 import { formatAuto } from "../../auto-mode.js";
+import { formatLocalTimestamp } from "../../utils.js";
 import { summarizeTurn } from "./attachments.js";
+import { nextCronOccurrence, parseCronExpression } from "./cron.js";
 
 export const CHAT_COMMANDS = [
   { command: "status", description: "Show current agent status" },
@@ -11,6 +13,7 @@ export const CHAT_COMMANDS = [
   { command: "clear_cache", description: "Clear cached attachments for this chat" },
   { command: "abort", description: "Abort current run and clear queued messages" },
   { command: "new", description: "Start a fresh session and clear context" },
+  { command: "schedule", description: "List or manage scheduled runs for this chat" },
   { command: "reset", description: "Reload config defaults for this chat" }
 ];
 
@@ -30,8 +33,33 @@ export function renderStatusMessage({
   model,
   reasoningEffort,
   usage,
-  queue
+  queue,
+  schedules = []
 }) {
+  const enabledSchedules = schedules.filter((schedule) => schedule.enabled !== false);
+  const disabledSchedules = schedules.filter((schedule) => schedule.enabled === false);
+  let nextScheduleLine = "n/a";
+  if (enabledSchedules.length > 0) {
+    const nextSchedule = enabledSchedules
+      .map((schedule) => {
+        try {
+          return {
+            ...schedule,
+            next: nextCronOccurrence(parseCronExpression(schedule.cron))
+          };
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean)
+      .sort((left, right) => left.next.getTime() - right.next.getTime())[0];
+    if (nextSchedule) {
+      nextScheduleLine = `${nextSchedule.mode} ${nextSchedule.name} at ${formatLocalTimestamp(
+        Math.floor(nextSchedule.next.getTime() / 1000)
+      )}`;
+    }
+  }
+
   const lines = [
     `running: ${isRunning ? "yes" : "no"}`,
     `cli: ${cli}`,
@@ -40,6 +68,8 @@ export function renderStatusMessage({
     `model: ${model}`,
     `reasoning_effort: ${reasoningEffort}`,
     `context_length: ${usage.contextLength}`,
+    `schedules: ${enabledSchedules.length} enabled, ${disabledSchedules.length} disabled`,
+    `next_schedule: ${nextScheduleLine}`,
     "queue:",
     summarizeQueue(queue)
   ];

@@ -1,0 +1,3 @@
+# Per-Conversation Durable State And Scheduled Runs
+
+AnyAgent persists runtime state per **Conversation**, not per process or per chat platform, so each private chat, group topic, or thread owns its own resumable front **Conversation Session**, runtime overrides, **Delivery Anchor**, and scheduled runs. We store this durable state separately from attachment cache, restore scheduled conversations eagerly on runtime startup, and let each `BotRuntime` own scheduling for its own conversations; **Heartbeat Scheduled Turns** run through the normal front conversation queue and context, while **Background Scheduled Runs** always start fresh, ignore missed cron occurrences, and deliver only a marked final text result back into the same conversation.

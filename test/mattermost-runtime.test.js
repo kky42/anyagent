@@ -506,9 +506,10 @@ test("Mattermost group channels trigger every post and use separate sessions for
 
   assert.deepEqual([...runtime.sessions.keys()], ["channel1", "channel1:thread:root1"]);
   assert.equal(runnerFactory.runs.length, 2);
-  assert.match(runnerFactory.runs[1].params.message, /This transcript includes the thread root/);
-  assert.match(runnerFactory.runs[1].params.message, /root post/);
+  assert.match(runnerFactory.runs[1].params.message, /^Messages since your last turn:/);
   assert.match(runnerFactory.runs[1].params.message, /@relaybot please answer/);
+  assert.match(runnerFactory.runs[1].params.message, /Reference context:/);
+  assert.match(runnerFactory.runs[1].params.message, /root post/);
   await runnerFactory.runs[1].emit({
     type: "item.completed",
     item: {

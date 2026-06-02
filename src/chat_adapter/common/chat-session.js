@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import path from "node:path";
 
 import { formatAuto, parseAutoArgument } from "../../auto-mode.js";
 import { SUPPORTED_AGENT_CLIS, cliAdapterFor } from "../../cli_adapter/index.js";
@@ -21,10 +22,31 @@ import {
   PRIVATE_OUTPUT_DEVELOPER_INSTRUCTIONS
 } from "./output-instructions.js";
 import { renderStatusMessage } from "./render.js";
+import { ConversationStateStore } from "./conversation-state.js";
 import { NOOP_CONFIG_STORE, SessionPersistence } from "./session-persistence.js";
 import { prepareForSessionReset, resetSession } from "./session-reset.js";
 
 const CLI_COMMAND_CHOICES = ["codex", "pi", "claude"];
+
+function looksLikeResumeFailure(text) {
+  const normalized = String(text ?? "").trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    /(resume|session|thread)/.test(normalized) &&
+    /(not found|unknown|missing|invalid|expired|cannot|can't|failed|does not exist|no such)/.test(
+      normalized
+    )
+  );
+}
+
+function ignorePersistenceFailure(promise, logger, label) {
+  void promise.catch((error) => {
+    logger(`failed to persist ${label}: ${toErrorMessage(error)}`);
+  });
+}
 
 /**
  * @typedef {import("../../cli_adapter/turn-input.js").Turn} Turn
@@ -41,6 +63,8 @@ export class ChatSession {
     bindingId,
     conversationId,
     cacheRootDir = DEFAULT_CACHE_PATH,
+    stateStore = null,
+    deliveryAnchor = null,
     createAgentRun = null,
     createCodexRun = null,
     resolveContextLength = null,
@@ -67,8 +91,18 @@ export class ChatSession {
     this.usesDefaultContextLengthResolver = !resolveContextLength;
     this.resolveContextLength = resolveContextLength ?? this.cliAdapter.resolveContextLength;
     this.resolveHomeDir = resolveHomeDir;
-    this.persistence = new SessionPersistence({
-      bindingConfig: this.bindingConfig
+    this.persistence = SessionPersistence.loadSync({
+      bindingConfig: this.bindingConfig,
+      platform: this.platform,
+      bindingId: this.bindingId,
+      conversationId: this.conversationId,
+      deliveryAnchor,
+      stateStore:
+        stateStore ??
+        new ConversationStateStore({
+          rootDir: path.join(path.dirname(this.cacheRootDir), "state")
+        }),
+      logger: this.logger
     });
   }
 
@@ -77,7 +111,11 @@ export class ChatSession {
   }
 
   set sessionId(sessionId) {
-    this.persistence.sessionId = sessionId;
+    ignorePersistenceFailure(
+      this.persistence.updateSessionId(sessionId),
+      this.logger,
+      "session id"
+    );
   }
 
   get contextLength() {
@@ -85,47 +123,39 @@ export class ChatSession {
   }
 
   set contextLength(contextLength) {
-    this.persistence.contextLength = contextLength;
+    ignorePersistenceFailure(
+      this.persistence.updateContextLength(contextLength),
+      this.logger,
+      "context length"
+    );
   }
 
   get cli() {
     return this.persistence.cli;
   }
 
-  set cli(cli) {
-    this.persistence.cli = cli;
-  }
-
   get workdir() {
     return this.persistence.workdir;
-  }
-
-  set workdir(workdir) {
-    this.persistence.workdir = workdir;
   }
 
   get auto() {
     return this.persistence.auto;
   }
 
-  set auto(auto) {
-    this.persistence.auto = auto;
-  }
-
   get model() {
     return this.persistence.model;
-  }
-
-  set model(model) {
-    this.persistence.model = model;
   }
 
   get reasoningEffort() {
     return this.persistence.reasoningEffort;
   }
 
-  set reasoningEffort(reasoningEffort) {
-    this.persistence.reasoningEffort = reasoningEffort;
+  get schedules() {
+    return this.persistence.schedules;
+  }
+
+  get deliveryAnchor() {
+    return this.persistence.deliveryAnchor;
   }
 
   resetTransientTurnState() {
@@ -238,7 +268,13 @@ export class ChatSession {
       groupInput,
       mergeKey: turn?.mergeKey ?? null,
       groupIdentity: turn?.groupIdentity ?? null,
-      developerInstructions: turn?.developerInstructions ?? null
+      developerInstructions: turn?.developerInstructions ?? null,
+      suppressQueueNotice: Boolean(turn?.suppressQueueNotice),
+      scheduleName: typeof turn?.scheduleName === "string" ? turn.scheduleName : null,
+      resumeRetryCount:
+        Number.isInteger(turn?.resumeRetryCount) && turn.resumeRetryCount > 0
+          ? turn.resumeRetryCount
+          : 0
     };
   }
 
@@ -262,8 +298,12 @@ export class ChatSession {
     return this.persistence.updateContextLength(contextLength);
   }
 
-  clearPersistedState() {
-    return this.persistence.clearPersistedState();
+  updateDeliveryAnchor(deliveryAnchor) {
+    return this.persistence.updateDeliveryAnchor(deliveryAnchor);
+  }
+
+  clearSessionState() {
+    return this.persistence.clearSessionState();
   }
 
   resetChatToBindingDefaults() {
@@ -276,6 +316,21 @@ export class ChatSession {
 
   applyRuntimeSettings(patch) {
     return this.persistence.applyRuntimeSettings(patch);
+  }
+
+  replaceSchedules(schedules) {
+    return this.persistence.replaceSchedules(schedules);
+  }
+
+  removeQueuedScheduledTurns(scheduleName) {
+    const normalizedName = String(scheduleName ?? "").trim();
+    if (!normalizedName) {
+      return 0;
+    }
+
+    const previousLength = this.queue.length;
+    this.queue = this.queue.filter((turn) => turn.scheduleName !== normalizedName);
+    return previousLength - this.queue.length;
   }
 
   workdirValidationError() {
@@ -329,8 +384,8 @@ export class ChatSession {
     }
 
     await prepareForSessionReset(this);
-    this.workdir = nextWorkdir;
-    await this.clearPersistedState();
+    await this.applyRuntimeSettings({ workdir: nextWorkdir });
+    await this.clearSessionState();
 
     await this.sendText(
       `Workdir set to ${nextWorkdir}. Started a new session. The next message will open a fresh ${this.cliAdapter.displayName} session.`,
@@ -356,15 +411,15 @@ export class ChatSession {
     }
 
     await prepareForSessionReset(this);
-    this.cli = normalizedCli;
-    this.cliAdapter = cliAdapterFor(normalizedCli);
+    await this.applyRuntimeSettings({ cli: normalizedCli });
+    this.cliAdapter = cliAdapterFor(this.cli);
     if (this.usesDefaultRunFactory) {
       this.createAgentRun = (params) => this.cliAdapter.startRun(params);
     }
     if (this.usesDefaultContextLengthResolver) {
       this.resolveContextLength = this.cliAdapter.resolveContextLength;
     }
-    await this.clearPersistedState();
+    await this.clearSessionState();
 
     await this.sendText(
       `CLI set to ${normalizedCli}. Started a new session. The next message will open a fresh ${this.cliAdapter.displayName} session.`,
@@ -383,7 +438,8 @@ export class ChatSession {
       usage: {
         contextLength: formatTokenCountK(this.contextLength)
       },
-      queue: this.queue
+      queue: this.queue,
+      schedules: this.schedules
     });
   }
 
@@ -505,7 +561,7 @@ export class ChatSession {
   }
 
   async handleNewSession(options = {}) {
-    await resetSession(this, { clearPersistedState: true });
+    await resetSession(this, { clearSessionState: true });
     await this.sendText(
       `Started a new session. The next message will open a fresh ${this.cliAdapter.displayName} session.`,
       options
@@ -539,7 +595,6 @@ export class ChatSession {
     if (this.usesDefaultContextLengthResolver) {
       this.resolveContextLength = this.cliAdapter.resolveContextLength;
     }
-    this.persistence.bindingConfig = this.bindingConfig;
     await this.resetChatToBindingDefaults();
 
     await this.sendText(
@@ -558,6 +613,7 @@ export class ChatSession {
       const lastQueuedTurn = this.queue.at(-1);
       if (
         lastQueuedTurn?.mode === "group" &&
+        lastQueuedTurn.mergeKey &&
         lastQueuedTurn.mergeKey === normalizedTurn.mergeKey
       ) {
         mergeGroupTurns(lastQueuedTurn, normalizedTurn);
@@ -570,7 +626,7 @@ export class ChatSession {
 
     if (this.isRunning) {
       this.queue.push(normalizedTurn);
-      if (normalizedTurn.mode === "group") {
+      if (normalizedTurn.mode === "group" || normalizedTurn.suppressQueueNotice) {
         return;
       }
       await this.sendText(`Queued message ${this.queue.length}.`, {
@@ -609,9 +665,12 @@ export class ChatSession {
     let emittedError = false;
     let currentSessionId = this.sessionId;
     let completedTurn = false;
+    let resumeFailureMessage = null;
     const runCli = this.cli;
     const runCliAdapter = this.cliAdapter;
     const isGroupTurn = nextTurn.mode === "group";
+    const initialSessionId = this.sessionId;
+    const mayRetryFailedResume = Boolean(initialSessionId) && nextTurn.resumeRetryCount === 0;
     const message = nextTurn.groupInput
       ? buildGroupInputMessage(nextTurn.groupInput)
       : buildTurnInputMessage(nextTurn);
@@ -675,11 +734,11 @@ export class ChatSession {
             continue;
           }
           if (action.kind === "error") {
-            emittedError = true;
-            if (isGroupTurn) {
-              this.logger(`${runCliAdapter.id} error: ${action.text}`);
+            if (mayRetryFailedResume && looksLikeResumeFailure(action.text)) {
+              resumeFailureMessage = action.text;
               continue;
             }
+            emittedError = true;
             await this.renderErrorText(action.text, { replyTarget: nextTurn.replyTarget });
             continue;
           }
@@ -695,8 +754,11 @@ export class ChatSession {
             } catch (error) {
               emittedError = true;
               if (isGroupTurn) {
-                this.logger(
-                  `${runCliAdapter.id} group output delivery failed: ${toErrorMessage(error)}`
+                await this.renderErrorText(
+                  `Failed to deliver group output: ${toErrorMessage(error)}`,
+                  {
+                    replyTarget: nextTurn.replyTarget
+                  }
                 );
                 continue;
               }
@@ -729,11 +791,7 @@ export class ChatSession {
       if (completedTurn) {
         await this.clearProgressMessage();
       }
-      if (!result.sawTerminalEvent && !emittedError) {
-        if (isGroupTurn) {
-          this.logger(`${runCliAdapter.displayName} exited without a terminal JSON event.`);
-          return;
-        }
+      if (!result.sawTerminalEvent && !emittedError && !resumeFailureMessage) {
         await this.renderErrorText(
           `${runCliAdapter.displayName} exited without a terminal JSON event.`,
           {
@@ -742,19 +800,34 @@ export class ChatSession {
         );
       }
     } catch (error) {
-      if (isGroupTurn) {
-        this.logger(`${runCliAdapter.displayName} process error: ${toErrorMessage(error)}`);
-        return;
+      const processErrorText = `${runCliAdapter.displayName} process error: ${toErrorMessage(error)}`;
+      if (mayRetryFailedResume && looksLikeResumeFailure(processErrorText)) {
+        resumeFailureMessage = processErrorText;
+      } else {
+        await this.renderErrorText(processErrorText, {
+          replyTarget: nextTurn.replyTarget
+        });
       }
-      await this.renderErrorText(`${runCliAdapter.displayName} process error: ${toErrorMessage(error)}`, {
-        replyTarget: nextTurn.replyTarget
-      });
     } finally {
       this.activeRun = null;
       this.activeReplyTarget = null;
       this.isRunning = false;
       this.stopTyping();
       this.resetTransientTurnState();
+      if (resumeFailureMessage) {
+        await this.clearProgressMessage();
+        await this.clearSessionState();
+        this.queue.unshift({
+          ...nextTurn,
+          resumeRetryCount: nextTurn.resumeRetryCount + 1
+        });
+        await this.sendText(
+          "Stored session could not be resumed. Started a fresh session for this conversation.",
+          {
+            replyTarget: nextTurn.replyTarget
+          }
+        );
+      }
       if (this.queue.length > 0) {
         void this.drainQueue();
       }

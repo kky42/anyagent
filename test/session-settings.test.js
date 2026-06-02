@@ -150,6 +150,8 @@ test("status shows the latest context length", async () => {
       "model: default",
       "reasoning_effort: default",
       "context_length: 18.3k",
+      "schedules: 0 enabled, 0 disabled",
+      "next_schedule: n/a",
       "queue:",
       "empty"
     ].join("\n")

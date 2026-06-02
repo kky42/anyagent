@@ -318,7 +318,7 @@ test("MattermostWebSocketClient tracks ping activity with the real ws implementa
     const socket = await serverConnection;
     socket.ping("keepalive");
 
-    await waitFor(() => client.lastActivityAt > initialActivityAt);
+    await waitFor(() => client.lastActivityAt > initialActivityAt, 50);
 
     assert.ok(client.lastActivityAt > initialActivityAt);
     assert.equal(client.lastMessageAt, initialActivityAt);

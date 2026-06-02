@@ -181,7 +181,7 @@ test("common ChatSession owns queueing, run orchestration, and opaque reply targ
   assert.equal(runnerFactory.runs[1].params.sessionId, "session-1");
 });
 
-test("common ChatSession logs group output delivery failures separately from agent process errors", async () => {
+test("common ChatSession surfaces group output delivery failures as visible relay errors", async () => {
   const output = new FakeChatOutput();
   output.groupFinalFailure = new TypeError("fetch failed");
   const { session, runnerFactory, logs } = await createCommonSession({ output });
@@ -211,11 +211,52 @@ test("common ChatSession logs group output delivery failures separately from age
   await waitFor(() => !session.isRunning);
 
   assert.deepEqual(output.groupFinals, []);
-  assert.equal(
-    logs.some((message) => /group output delivery failed: fetch failed/.test(message)),
-    true
-  );
+  assert.deepEqual(output.errors, [
+    {
+      text: "Failed to deliver group output: fetch failed",
+      options: { replyTarget: { channelId: "channel-1" } }
+    }
+  ]);
   assert.equal(logs.some((message) => /process error/.test(message)), false);
+});
+
+test("common ChatSession retries once with a fresh session after resume failure", async () => {
+  const { session, output, runnerFactory } = await createCommonSession();
+  session.sessionId = "stale-session";
+
+  await session.enqueueMessage("retry me");
+  assert.equal(runnerFactory.runs.length, 1);
+  assert.equal(runnerFactory.runs[0].params.sessionId, "stale-session");
+
+  await runnerFactory.runs[0].emit({
+    type: "error",
+    message: "session not found"
+  });
+  runnerFactory.runs[0].finish();
+
+  await waitFor(() => runnerFactory.runs.length === 2);
+
+  assert.equal(output.texts.at(-1).text, "Stored session could not be resumed. Started a fresh session for this conversation.");
+  assert.equal(session.sessionId, null);
+  assert.equal(runnerFactory.runs[1].params.sessionId, null);
+
+  await runnerFactory.runs[1].emit({
+    type: "item.completed",
+    item: {
+      type: "agent_message",
+      text: "fresh answer"
+    }
+  });
+  await runnerFactory.runs[1].emit({
+    type: "turn.completed"
+  });
+  runnerFactory.runs[1].finish();
+
+  await waitFor(() => !session.isRunning);
+  assert.deepEqual(output.finals.at(-1), {
+    text: "fresh answer",
+    options: { replyTarget: null, workdir: "/tmp/project" }
+  });
 });
 
 test("common ChatSession cache scopes use generic platform and binding ids", async () => {
