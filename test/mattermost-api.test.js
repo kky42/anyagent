@@ -4,6 +4,8 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { WebSocketServer } from "ws";
+
 import { MattermostApi, MattermostWebSocketClient } from "../src/chat_adapter/mattermost/mattermost-api.js";
 import { flush, waitFor } from "./support/async.js";
 
@@ -290,6 +292,53 @@ test("MattermostWebSocketClient tracks socket activity, messages, and close deta
   assert.ok(client.lastMessageAt > 1);
   assert.deepEqual(closes, [{ code: 1006, reason: "network reset" }]);
   assert.deepEqual(client.lastClose, { code: 1006, reason: "network reset" });
+});
+
+test("MattermostWebSocketClient tracks ping activity with the real ws implementation", async () => {
+  const activities = [];
+  const wss = new WebSocketServer({ port: 0, path: "/api/v4/websocket" });
+  let serverSocket = null;
+  const serverConnection = new Promise((resolve) => {
+    wss.once("connection", (socket) => {
+      serverSocket = socket;
+      resolve(socket);
+    });
+  });
+
+  try {
+    const client = await new MattermostWebSocketClient({
+      serverUrl: `http://127.0.0.1:${wss.address().port}`,
+      token: "token"
+    }).connect({
+      onActivity: (now) => activities.push(now)
+    });
+
+    const initialActivityAt = client.lastActivityAt;
+    const rawSocket = client.socket;
+    const socket = await serverConnection;
+    socket.ping("keepalive");
+
+    await waitFor(() => client.lastActivityAt > initialActivityAt);
+
+    assert.ok(client.lastActivityAt > initialActivityAt);
+    assert.equal(client.lastMessageAt, initialActivityAt);
+    assert.equal(activities.length, 1);
+
+    const closed = new Promise((resolve) => {
+      rawSocket.once("close", resolve);
+    });
+    client.close();
+    await closed;
+  } finally {
+    if (serverSocket && serverSocket.readyState === 1) {
+      const serverClosed = new Promise((resolve) => {
+        serverSocket.once("close", resolve);
+      });
+      serverSocket.close();
+      await serverClosed;
+    }
+    await new Promise((resolve) => wss.close(resolve));
+  }
 });
 
 test("MattermostApi forwards websocket lifecycle callbacks", async () => {

@@ -224,6 +224,10 @@ export class MattermostWebSocketClient {
   }
 
   addSocketListener(name, handler) {
+    if ((name === "ping" || name === "pong") && typeof this.socket?.on === "function") {
+      this.socket.on(name, handler);
+      return;
+    }
     if (typeof this.socket?.addEventListener === "function") {
       this.socket.addEventListener(name, handler);
       return;
