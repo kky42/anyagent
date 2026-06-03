@@ -27,6 +27,7 @@
   "scripts": {
     "start": "node ./bin/anyagent.js",
     "test": "node --test",
+    "release": "npm version patch && git push --follow-tags",
     "test:e2e:agent-behavior": "node ./scripts/agent-behavior-e2e.js",
     "test:e2e:mattermost": "node ./scripts/mattermost-local-e2e.js",
     "smoke:contract-prompts": "node ./scripts/smoke-contract-prompts.js",
