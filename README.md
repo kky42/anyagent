@@ -16,7 +16,7 @@ AnyAgent in Telegram
 - Keep using the CLI agent you already set up locally, in Telegram or Mattermost chats, with the same config and no migration.
 - See live progress in direct chats and typing indicators while the agent works.
 - Use a full set of chat commands for a flow that feels close to the local CLI.
-- Use a small XML output contract for files and group-visible messages, keeping the relay explicit and inspectable.
+- Use a small output contract for files and group-visible messages, keeping the relay explicit and inspectable.
 
 ## Quick Start
 
@@ -137,21 +137,30 @@ Unlike Telegram, Mattermost bot accounts can receive posts from other bots in th
 
 ## Agent Output Contract
 
-In direct/private chats, normal agent text is sent to the chat. To send a local file in any chat type, the agent uses one XML block per file:
+In direct/private chats, normal agent text is sent to the chat. To send a local file in any chat type, put one `ATTACH` directive per file on its own line:
 
-```xml
-<attachment path="./artifacts/chart.png" kind="photo" />
+```text
+ATTACH ./artifacts/chart.png
 ```
 
-In group-like chats, raw agent text is not sent to the group. Visible group replies must be inside a group-message block:
+In group-like chats, raw agent text is not sent to the group. If no visible reply is needed, output exactly:
 
-```xml
-<group_message><![CDATA[
+```text
+NO_REPLY
+```
+
+Visible group replies must use `REPLY` blocks. Put `ATTACH` inside the `REPLY` block that should carry the file:
+
+```text
+REPLY
 Message to the group.
-]]></group_message>
+ATTACH ./artifacts/chart.png
+
+REPLY @alice
+Message to a specific participant.
 ```
 
-The relay sends visible group messages and attachments in the order they appear in the final agent output. Intermediate agent events are not sent to group-like chats.
+Only content inside `REPLY` blocks is sent to group-like chats. Text outside `REPLY` blocks is private scratch and is not delivered. The relay sends visible group messages and attachments in the order they appear in the final agent output. Intermediate agent events are not sent to group-like chats.
 
 ## Chat Commands
 
@@ -171,6 +180,7 @@ All chat commands require a manager username. In direct/private chats, the bot t
 | `/new` | `!new` | Start a fresh agent session for this chat. |
 | `/reset` | `!reset` | Reload config defaults for this chat and clear chat-specific overrides. |
 | `/clear_cache` | `!clear_cache` | Delete cached attachments for this chat. |
+| `/schedule` | `!schedule` | List or manage scheduled runs for this chat. |
 
 Examples:
 
@@ -180,6 +190,10 @@ Examples:
 /auto high
 /model default
 /reasoning high
+/schedule list
+/schedule add heartbeat pulse
+*/5 * * * *
+check the queue
 @your_bot_username /auto high
 /auto@your_bot_username high
 /auto @your_bot_username high
@@ -188,10 +202,16 @@ Examples:
 !auto high
 !model default
 !reasoning high
+!schedule list
+!schedule add background news
+0 9 * * *
+summarize overnight updates
 @your_bot_username !auto high
 !auto@your_bot_username high
 !auto @your_bot_username high
 ```
+
+`/schedule add` and `!schedule add` use three or more lines: the first line is `schedule add <heartbeat|background> <name>`, the second line is a five-field cron expression, and the remaining lines are the prompt. `heartbeat` schedules enqueue a normal turn in the chat session. `background` schedules run a fresh agent turn and post a marked notification when finished.
 
 ## Persistent Deployment With PM2
 
@@ -234,7 +254,7 @@ pm2 save
 - Messages sent while the relay is stopped are discarded on startup.
 - Telegram and Mattermost chats are supported. Group/channel messages trigger when the chat platform delivers them to the bot.
 - Supported Telegram attachments: photos, documents, videos, audio, voice messages, and animations. Mattermost file attachments are supported as files.
-- Attachments larger than 20 MB are rejected.
+- Inbound chat attachments larger than 20 MB are rejected. Outbound local files sent with `ATTACH` are limited to 50 MB.
 - Chat-specific command changes only affect that chat session.
 - Local config and runtime files live under `~/.anyagent/`.
 
