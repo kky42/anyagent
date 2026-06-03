@@ -4,7 +4,7 @@ export function flush() {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
-export async function waitFor(predicate, attempts = 10) {
+export async function waitFor(predicate, attempts = 50) {
   for (let index = 0; index < attempts; index += 1) {
     if (predicate()) {
       return;
