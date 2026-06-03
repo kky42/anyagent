@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { waitFor } from "./support/async.js";
 import { createRuntime } from "./support/builders.js";
+import { formatLocalTimestamp } from "../src/utils.js";
 
 function buildTextMessage(text, username = "AllowedUser", chatId = 1001, overrides = {}) {
   return {
@@ -59,11 +60,8 @@ test("background scheduled runs use a fresh agent turn and emit a marked notific
     enabled: true
   };
 
-  const backgroundRunPromise = runtime.runBackgroundSchedule(
-    session,
-    schedule,
-    new Date("2026-06-03T01:02:03Z")
-  );
+  const triggeredAt = new Date("2026-06-03T01:02:03Z");
+  const backgroundRunPromise = runtime.runBackgroundSchedule(session, schedule, triggeredAt);
   await waitFor(() => runnerFactory.runs.length === 1, 20);
 
   assert.equal(runnerFactory.runs[0].params.sessionId, null);
@@ -82,6 +80,8 @@ test("background scheduled runs use a fresh agent turn and emit a marked notific
 
   assert.equal(
     fakeBotApi.messages.at(-1).text,
-    "Background scheduled run: news\nTriggered: 2026-06-03 09:02:03\n\nHere are the headlines."
+    `Background scheduled run: news\nTriggered: ${formatLocalTimestamp(
+      Math.floor(triggeredAt.getTime() / 1000)
+    )}\n\nHere are the headlines.`
   );
 });
