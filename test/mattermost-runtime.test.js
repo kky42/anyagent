@@ -544,6 +544,116 @@ test("Mattermost group addressed commands use the common command router", async 
   assert.match(botApi.posts[0].message, /running: no/);
 });
 
+test("Mattermost schedule add preserves multiline command args", async () => {
+  const { runtime, botApi, runnerFactory } = await createRuntime();
+  botApi.channels.set("dm1", { id: "dm1", type: "D" });
+  botApi.users.set("u1", { id: "u1", username: "alice" });
+
+  await runtime.handleEvent(postedEvent({
+    id: "post1",
+    channel_id: "dm1",
+    user_id: "u1",
+    message: "!schedule add heartbeat product-design-followup\n*/5 * * * *\ncontinue product design followup",
+    create_at: 1000,
+    file_ids: []
+  }));
+  await flush();
+
+  const session = runtime.sessionFor("dm1");
+  assert.equal(runnerFactory.runs.length, 0);
+  assert.deepEqual(session.schedules, [
+    {
+      name: "product-design-followup",
+      mode: "heartbeat",
+      cron: "*/5 * * * *",
+      prompt: "continue product design followup",
+      enabled: true
+    }
+  ]);
+  assert.equal(
+    botApi.posts[0].message,
+    'Added schedule "product-design-followup".\nmode: heartbeat\ncron: */5 * * * *'
+  );
+});
+
+test("Mattermost group schedule add preserves multiline addressed command args", async () => {
+  const cases = [
+    {
+      name: "leading mention",
+      scheduleName: "product-leading",
+      message: "@relaybot !schedule add heartbeat product-leading\n*/5 * * * *\ncontinue product design followup"
+    },
+    {
+      name: "first argument mention",
+      scheduleName: "product-argument",
+      message: "!schedule @relaybot add heartbeat product-argument\n*/5 * * * *\ncontinue product design followup"
+    },
+    {
+      name: "command token mention",
+      scheduleName: "product-command",
+      message: "!schedule@relaybot add heartbeat product-command\n*/5 * * * *\ncontinue product design followup"
+    }
+  ];
+
+  for (const testCase of cases) {
+    const { runtime, botApi, runnerFactory } = await createRuntime();
+    botApi.channels.set("channel1", { id: "channel1", type: "O" });
+    botApi.users.set("u1", { id: "u1", username: "alice" });
+
+    await runtime.handleEvent(postedEvent({
+      id: `post-${testCase.scheduleName}`,
+      channel_id: "channel1",
+      user_id: "u1",
+      message: testCase.message,
+      create_at: 1000,
+      file_ids: []
+    }));
+    await flush();
+
+    const session = runtime.sessionFor("channel1");
+    assert.equal(runnerFactory.runs.length, 0, testCase.name);
+    assert.deepEqual(
+      session.schedules,
+      [
+        {
+          name: testCase.scheduleName,
+          mode: "heartbeat",
+          cron: "*/5 * * * *",
+          prompt: "continue product design followup",
+          enabled: true
+        }
+      ],
+      testCase.name
+    );
+    assert.equal(
+      botApi.posts[0].message,
+      `Added schedule "${testCase.scheduleName}".\nmode: heartbeat\ncron: */5 * * * *`,
+      testCase.name
+    );
+  }
+});
+
+test("Mattermost group commands reject trailing targets", async () => {
+  const { runtime, botApi, runnerFactory } = await createRuntime();
+  botApi.channels.set("channel1", { id: "channel1", type: "O" });
+  botApi.users.set("u1", { id: "u1", username: "alice" });
+
+  await runtime.handleEvent(postedEvent({
+    id: "post1",
+    channel_id: "channel1",
+    user_id: "u1",
+    message: "!schedule add heartbeat product-trailing @relaybot\n*/5 * * * *\ncontinue product design followup",
+    create_at: 1000,
+    file_ids: []
+  }));
+  await flush();
+
+  const session = runtime.sessionFor("channel1");
+  assert.equal(runnerFactory.runs.length, 0);
+  assert.deepEqual(session.schedules, []);
+  assert.match(botApi.posts[0].message, /Group commands must mention this bot/);
+});
+
 test("Mattermost group commands without a bot target are rejected", async () => {
   const { runtime, botApi, runnerFactory } = await createRuntime();
   botApi.channels.set("channel1", { id: "channel1", type: "O" });

@@ -658,6 +658,66 @@ test("runtime routes addressed group commands without starting an agent run", as
   assert.match(fakeBotApi.messages.at(-1).text, /running: no/);
 });
 
+test("runtime preserves multiline schedule args for addressed Telegram group commands", async () => {
+  const cases = [
+    {
+      name: "leading mention",
+      scheduleName: "pulse-leading",
+      text: "@relaybot /schedule add heartbeat pulse-leading\n*/5 * * * *\ncheck the queue"
+    },
+    {
+      name: "first argument mention",
+      scheduleName: "pulse-argument",
+      text: "/schedule @relaybot add heartbeat pulse-argument\n*/5 * * * *\ncheck the queue"
+    },
+    {
+      name: "command token mention",
+      scheduleName: "pulse-command",
+      text: "/schedule@relaybot add heartbeat pulse-command\n*/5 * * * *\ncheck the queue"
+    }
+  ];
+
+  for (const testCase of cases) {
+    const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
+
+    await runtime.handleMessage(buildGroupTextMessage(testCase.text));
+
+    const session = runtime.sessionFor(-1001);
+    assert.equal(runnerFactory.runs.length, 0, testCase.name);
+    assert.deepEqual(
+      session.schedules,
+      [
+        {
+          name: testCase.scheduleName,
+          mode: "heartbeat",
+          cron: "*/5 * * * *",
+          prompt: "check the queue",
+          enabled: true
+        }
+      ],
+      testCase.name
+    );
+    assert.equal(
+      fakeBotApi.messages.at(-1).text,
+      `Added schedule "${testCase.scheduleName}".\nmode: heartbeat\ncron: */5 * * * *`,
+      testCase.name
+    );
+  }
+});
+
+test("runtime rejects trailing Telegram group command targets", async () => {
+  const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
+
+  await runtime.handleMessage(
+    buildGroupTextMessage("/schedule add heartbeat pulse-trailing @relaybot\n*/5 * * * *\ncheck the queue")
+  );
+
+  const session = runtime.sessionFor(-1001);
+  assert.equal(runnerFactory.runs.length, 0);
+  assert.deepEqual(session.schedules, []);
+  assert.match(fakeBotApi.messages.at(-1).text, /Group commands must mention this bot/);
+});
+
 test("runtime rejects group commands without a Telegram bot target", async () => {
   const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
 
@@ -713,7 +773,7 @@ test("runtime rejects relay commands from unauthorized Telegram group users", as
   const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
 
   await runtime.handleMessage(
-    buildGroupTextMessage("/auto high @relaybot", {
+    buildGroupTextMessage("/auto @relaybot high", {
       from: { id: 99, username: "OtherUser" },
       entities: [{ type: "bot_command", offset: 0, length: "/auto".length }]
     })

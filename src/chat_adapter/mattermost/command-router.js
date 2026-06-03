@@ -8,24 +8,53 @@ function isCommandText(text) {
   return String(text || "").startsWith("/") || String(text || "").startsWith("!");
 }
 
+function firstToken(text) {
+  const trimmed = String(text || "").trim();
+  const [token = ""] = trimmed.split(/\s+/, 1);
+  return {
+    token,
+    rest: trimmed.slice(token.length).trim()
+  };
+}
+
+function targetForUsername(username, botUsername) {
+  const normalizedUsername = normalizeMattermostUsername(username);
+  if (!normalizedUsername) {
+    return null;
+  }
+  const normalizedBotUsername = normalizeMattermostUsername(botUsername);
+  return {
+    target: normalizedBotUsername && normalizedUsername === normalizedBotUsername ? "self" : "other",
+    username: normalizedUsername
+  };
+}
+
 function leadingMentionTarget(text, botUsername) {
   const trimmed = String(text || "").trim();
-  const normalizedBotUsername = normalizeMattermostUsername(botUsername);
   if (!trimmed.startsWith("@")) {
     return null;
   }
 
-  const [token] = trimmed.split(/\s+/, 1);
-  const username = normalizeMattermostUsername(token);
-  if (!username) {
+  const { token, rest } = firstToken(trimmed);
+  const target = targetForUsername(token, botUsername);
+  if (!target) {
     return null;
   }
 
   return {
-    target: normalizedBotUsername && username === normalizedBotUsername ? "self" : "other",
-    username,
-    text: trimmed.slice(token.length).trim()
+    ...target,
+    text: rest
   };
+}
+
+function firstArgTarget(args, botUsername) {
+  const { token, rest } = firstToken(args);
+  if (!token.startsWith("@")) {
+    return null;
+  }
+
+  const target = targetForUsername(token, botUsername);
+  return target ? { ...target, args: rest } : null;
 }
 
 export function parseCommand(text, botUsername) {
@@ -39,52 +68,39 @@ export function parseCommand(text, botUsername) {
     return null;
   }
 
-  const [token] = trimmed.split(/\s+/, 1);
+  const { token, rest: rawArgs } = firstToken(trimmed);
   const [commandName, mention] = token.slice(1).split("@");
-  if (mention && normalizeMattermostUsername(mention) !== normalizeMattermostUsername(botUsername)) {
-    return {
-      command: commandName.toLowerCase(),
-      args: trimmed.slice(token.length).trim(),
-      commandLike: true,
-      target: "other",
-      ignored: true
-    };
-  }
-
-  const rawArgs = trimmed.slice(token.length).trim();
-  if (leadingTarget?.target === "other") {
+  if (mention) {
+    const target = targetForUsername(mention, botUsername);
     return {
       command: commandName.toLowerCase(),
       args: rawArgs,
       commandLike: true,
-      target: "other",
-      ignored: true
+      target: target?.target ?? "other",
+      ignored: target?.target !== "self"
     };
   }
 
-  const bot = normalizeMattermostUsername(botUsername);
-  const args = rawArgs
-    .split(/\s+/)
-    .filter((arg) => normalizeMattermostUsername(arg) !== bot)
-    .join(" ")
-    .trim();
-  const hasSelfTarget =
-    Boolean(mention) ||
-    leadingTarget?.target === "self" ||
-    rawArgs.split(/\s+/).some((arg) => normalizeMattermostUsername(arg) === bot);
-  const hasOtherTarget =
-    !hasSelfTarget &&
-    rawArgs.split(/\s+/).some((arg) => {
-      const username = normalizeMattermostUsername(arg);
-      return username && arg.startsWith("@") && username !== bot;
-    });
+  if (leadingTarget) {
+    return {
+      command: commandName.toLowerCase(),
+      args: rawArgs,
+      commandLike: true,
+      target: leadingTarget.target,
+      ignored: leadingTarget.target !== "self"
+    };
+  }
+
+  const argTarget = firstArgTarget(rawArgs, botUsername);
+  const target = argTarget?.target ?? "none";
+  const args = argTarget ? argTarget.args : rawArgs;
 
   return {
     command: commandName.toLowerCase(),
     args,
     commandLike: true,
-    target: hasSelfTarget ? "self" : hasOtherTarget ? "other" : "none",
-    ignored: hasOtherTarget
+    target,
+    ignored: target === "other"
   };
 }
 

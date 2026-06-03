@@ -117,7 +117,7 @@ If you do not know your Telegram username, send the bot any message once. The un
 
 In group chats and supergroups, every non-command message delivered to the bot triggers the agent or joins the next pending agent turn. If multiple unprocessed group messages arrive while the agent is running, AnyAgent sends them to the agent as one plain-text transcript in delivery order, including timestamp, display name, handle, message text, and downloaded attachments next to the message that carried them.
 
-Group commands must mention the bot, for example `/status @your_bot_username` or `/auto high @your_bot_username`. Commands for another bot are silently ignored. Command-shaped messages are never sent to the agent.
+Group commands must mention the bot in a supported target position: before the command (`@your_bot_username /status`), inside the command token (`/status@your_bot_username`), or immediately after the command (`/status @your_bot_username`, `/auto @your_bot_username high`). Targets after command arguments, such as `/auto high @your_bot_username`, are not parsed as command targets. Commands for another bot using the same target positions are silently ignored. Command-shaped messages are never sent to the agent.
 
 Telegram forum topics use separate agent sessions. Ordinary replies inside a group do not create separate sessions.
 
@@ -130,7 +130,7 @@ In direct messages, each Mattermost direct channel maps to one agent session. In
 
 Mattermost channel posts, group messages, and threads are group-like chats. A Mattermost thread gets its own agent session keyed by the thread root. The first turn in a thread includes the thread root as a normal transcript message before the new message.
 
-Group-like Mattermost commands must mention the bot, for example `!status @your_bot_username` or `!auto high @your_bot_username`. `@your_bot_username !status` and `!status@your_bot_username` are also accepted. Commands addressed to another bot with the same target forms, including `@other_bot !status` and `@other_bot /status`, are ignored.
+Group-like Mattermost commands must mention the bot in a supported target position: before the command (`@your_bot_username !status`), inside the command token (`!status@your_bot_username`), or immediately after the command (`!status @your_bot_username`, `!auto @your_bot_username high`). Targets after command arguments, such as `!auto high @your_bot_username`, are not parsed as command targets. Commands addressed to another bot with the same target forms, including `@other_bot !status` and `@other_bot /status`, are ignored.
 
 Mattermost renders the agent output as native Markdown, including tables and fenced code blocks. The relay uses Mattermost post edits for transient progress and WebSocket typing indicators for active runs.
 Unlike Telegram, Mattermost bot accounts can receive posts from other bots in the same channel or thread. AnyAgent still ignores its own bot posts, but another bot's post can appear in the transcript and can trigger the agent.
@@ -157,7 +157,7 @@ The relay sends visible group messages and attachments in the order they appear 
 
 Telegram commands use `/`. Mattermost commands use `!` because Mattermost handles `/` slash commands before they reach this WebSocket relay unless you configure a separate slash-command integration.
 
-All chat commands require a manager username. In direct/private chats, the bot target is optional. In group-like chats, commands without a bot target are rejected with a visible warning, commands targeting another bot are ignored, and unknown commands are rejected instead of being sent to the agent.
+All chat commands require a manager username. In direct/private chats, the bot target is optional. In group-like chats, commands without a supported bot target are rejected with a visible warning, commands targeting another bot are ignored, and unknown commands are rejected instead of being sent to the agent. Supported group target positions are before the command, inside the command token, or immediately after the command before any command arguments.
 
 | Telegram | Mattermost | Purpose |
 | --- | --- | --- |
@@ -180,11 +180,17 @@ Examples:
 /auto high
 /model default
 /reasoning high
+@your_bot_username /auto high
+/auto@your_bot_username high
+/auto @your_bot_username high
 !cli claude
 !workdir ~/projects/my-app
 !auto high
 !model default
 !reasoning high
+@your_bot_username !auto high
+!auto@your_bot_username high
+!auto @your_bot_username high
 ```
 
 ## Persistent Deployment With PM2

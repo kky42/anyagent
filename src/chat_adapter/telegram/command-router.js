@@ -1,75 +1,94 @@
 import { normalizeTelegramUsername } from "../../utils.js";
 import { routeCommandOrTurn, routeKnownCommand } from "../common/command-router.js";
 
-function commandTargetFromArgs(args, botUsername) {
-  const bot = normalizeTelegramUsername(botUsername);
-  const tokens = String(args ?? "").trim().split(/\s+/).filter(Boolean);
-  let otherUsername = null;
-  for (const token of tokens) {
-    if (!token.startsWith("@")) {
-      continue;
-    }
-    const username = normalizeTelegramUsername(token);
-    if (!username) {
-      continue;
-    }
-    if (username === bot) {
-      return {
-        target: "self",
-        username
-      };
-    }
-    otherUsername ??= username;
-  }
-  if (otherUsername) {
-    return {
-      target: "other",
-      username: otherUsername
-    };
-  }
+function isCommandText(text) {
+  return String(text || "").startsWith("/");
+}
+
+function firstToken(text) {
+  const trimmed = String(text || "").trim();
+  const [token = ""] = trimmed.split(/\s+/, 1);
   return {
-    target: "none",
-    username: null
+    token,
+    rest: trimmed.slice(token.length).trim()
   };
 }
 
-function stripTargetFromArgs(args, targetUsername) {
-  if (!targetUsername) {
-    return String(args ?? "").trim();
+function targetForUsername(username, botUsername) {
+  const normalizedUsername = normalizeTelegramUsername(username);
+  if (!normalizedUsername) {
+    return null;
   }
-  return String(args ?? "")
-    .trim()
-    .split(/\s+/)
-    .filter((token) => normalizeTelegramUsername(token) !== targetUsername)
-    .join(" ")
-    .trim();
+  const normalizedBotUsername = normalizeTelegramUsername(botUsername);
+  return {
+    target: normalizedBotUsername && normalizedUsername === normalizedBotUsername ? "self" : "other",
+    username: normalizedUsername
+  };
+}
+
+function leadingMentionTarget(text, botUsername) {
+  const trimmed = String(text || "").trim();
+  if (!trimmed.startsWith("@")) {
+    return null;
+  }
+
+  const { token, rest } = firstToken(trimmed);
+  const target = targetForUsername(token, botUsername);
+  if (!target) {
+    return null;
+  }
+
+  return {
+    ...target,
+    text: rest
+  };
+}
+
+function firstArgTarget(args, botUsername) {
+  const { token, rest } = firstToken(args);
+  if (!token.startsWith("@")) {
+    return null;
+  }
+
+  const target = targetForUsername(token, botUsername);
+  return target ? { ...target, args: rest } : null;
 }
 
 export function parseCommand(text, botUsername, options = {}) {
-  const trimmed = String(text || "").trim();
+  const originalText = String(text || "").trim();
+  const leadingTarget = leadingMentionTarget(originalText, botUsername);
+  const trimmed =
+    leadingTarget && isCommandText(leadingTarget.text) ? leadingTarget.text : originalText;
   if (!trimmed.startsWith("/")) {
     return null;
   }
 
-  const [token] = trimmed.split(/\s+/, 1);
+  const { token, rest: rawArgs } = firstToken(trimmed);
   const [commandName, mention] = token.slice(1).split("@");
-  if (mention && normalizeTelegramUsername(mention) !== normalizeTelegramUsername(botUsername)) {
+  if (mention) {
+    const target = targetForUsername(mention, botUsername);
     return {
       command: commandName.toLowerCase(),
-      args: trimmed.slice(token.length).trim(),
+      args: rawArgs,
       commandLike: true,
-      target: "other",
-      ignored: true
+      target: target?.target ?? "other",
+      ignored: target?.target !== "self"
     };
   }
 
-  const rawArgs = trimmed.slice(token.length).trim();
-  const argTarget = commandTargetFromArgs(rawArgs, botUsername);
-  const target = mention ? "self" : argTarget.target;
-  const targetUsername = mention ? normalizeTelegramUsername(mention) : argTarget.username;
-  const args = options.stripTarget === false
-    ? rawArgs
-    : stripTargetFromArgs(rawArgs, targetUsername);
+  if (leadingTarget) {
+    return {
+      command: commandName.toLowerCase(),
+      args: rawArgs,
+      commandLike: true,
+      target: leadingTarget.target,
+      ignored: leadingTarget.target !== "self"
+    };
+  }
+
+  const argTarget = firstArgTarget(rawArgs, botUsername);
+  const target = argTarget?.target ?? "none";
+  const args = options.stripTarget === false || !argTarget ? rawArgs : argTarget.args;
 
   return {
     command: commandName.toLowerCase(),

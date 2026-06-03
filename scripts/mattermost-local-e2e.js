@@ -45,6 +45,17 @@ function normalizeServerUrl(rawUrl) {
   return String(rawUrl ?? "").trim().replace(/\/+$/, "");
 }
 
+function cronInMinutes(minutesFromNow) {
+  const date = new Date(Date.now() + minutesFromNow * 60_000);
+  return [
+    date.getMinutes(),
+    date.getHours(),
+    date.getDate(),
+    date.getMonth() + 1,
+    "*"
+  ].join(" ");
+}
+
 function runCommand(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: options.cwd ?? process.cwd(),
@@ -523,6 +534,15 @@ async function botPostsSince(serverUrl, token, channelId, botUserId, sinceMs) {
   );
 }
 
+async function botPostIds(serverUrl, token, channelId, botUserId) {
+  const posts = await channelPosts(serverUrl, token, channelId);
+  return new Set(
+    posts
+      .filter((post) => String(post?.user_id ?? "") === botUserId)
+      .map((post) => String(post.id))
+  );
+}
+
 async function waitForBotPost(serverUrl, token, channelId, botUserId, sinceMs, predicate, label, timeoutMs) {
   return waitFor(
     async () => {
@@ -652,8 +672,68 @@ async function main() {
       );
     }
 
-    console.log("[mattermost-e2e] testing unrelated group output suppression");
+    console.log("[mattermost-e2e] testing addressed group schedule commands");
+    const scheduleCron = cronInMinutes(10);
+    const scheduleCases = [
+      {
+        name: "leading",
+        scheduleName: `e2e-leading-${fixture.suffix}`,
+        message: `@${fixture.botUsername} !schedule add heartbeat e2e-leading-${fixture.suffix}\n${scheduleCron}\ncontinue from leading mention`
+      },
+      {
+        name: "first-argument",
+        scheduleName: `e2e-argument-${fixture.suffix}`,
+        message: `!schedule @${fixture.botUsername} add heartbeat e2e-argument-${fixture.suffix}\n${scheduleCron}\ncontinue from first argument mention`
+      },
+      {
+        name: "command-token",
+        scheduleName: `e2e-command-${fixture.suffix}`,
+        message: `!schedule@${fixture.botUsername} add heartbeat e2e-command-${fixture.suffix}\n${scheduleCron}\ncontinue from command token mention`
+      }
+    ];
+    for (const scheduleCase of scheduleCases) {
+      sinceMs = Date.now() - 1000;
+      await createPost(serverUrl, fixture.adminToken, fixture.channelId, scheduleCase.message);
+      await waitForBotPost(
+        serverUrl,
+        fixture.adminToken,
+        fixture.channelId,
+        fixture.botUserId,
+        sinceMs,
+        (post) =>
+          post.message ===
+          `Added schedule "${scheduleCase.scheduleName}".\nmode: heartbeat\ncron: ${scheduleCron}`,
+        `group schedule command ${scheduleCase.name}`,
+        timeoutMs
+      );
+    }
+
+    console.log("[mattermost-e2e] testing trailing group schedule target rejection");
     sinceMs = Date.now() - 1000;
+    await createPost(
+      serverUrl,
+      fixture.adminToken,
+      fixture.channelId,
+      `!schedule add heartbeat e2e-trailing-${fixture.suffix} @${fixture.botUsername}\n${scheduleCron}\nshould not create a schedule`
+    );
+    await waitForBotPost(
+      serverUrl,
+      fixture.adminToken,
+      fixture.channelId,
+      fixture.botUserId,
+      sinceMs,
+      (post) => /Group commands must mention this bot/.test(post.message ?? ""),
+      "trailing group schedule target rejection",
+      timeoutMs
+    );
+
+    console.log("[mattermost-e2e] testing unrelated group output suppression");
+    const botPostsBeforeUnrelated = await botPostIds(
+      serverUrl,
+      fixture.adminToken,
+      fixture.channelId,
+      fixture.botUserId
+    );
     await createPost(serverUrl, fixture.adminToken, fixture.channelId, "unrelated group chatter");
     const unrelatedInvocation = await waitForFakeInvocation(
       fakeCodexLogPath,
@@ -663,8 +743,15 @@ async function main() {
     );
     assertGroupOutputContract(unrelatedInvocation);
     await sleep(1500);
+    const botPostsAfterUnrelated = await botPostsSince(
+      serverUrl,
+      fixture.adminToken,
+      fixture.channelId,
+      fixture.botUserId,
+      0
+    );
     assert.deepEqual(
-      await botPostsSince(serverUrl, fixture.adminToken, fixture.channelId, fixture.botUserId, sinceMs),
+      botPostsAfterUnrelated.filter((post) => !botPostsBeforeUnrelated.has(String(post.id))),
       []
     );
 
