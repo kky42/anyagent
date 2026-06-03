@@ -190,28 +190,38 @@ export class BotRuntime {
     }
   }
 
+  syncScheduleTimer(session, schedule) {
+    const key = this.scheduleKey(session.conversationId, schedule.name);
+    const existingTimer = this.scheduleTimers.get(key);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      this.scheduleTimers.delete(key);
+    }
+
+    if (schedule.enabled === false) {
+      return;
+    }
+
+    try {
+      const next = describeNextSchedule(schedule);
+      const delayMs = Math.max(0, next.getTime() - Date.now());
+      const timer = setTimeout(() => {
+        void this.handleScheduledOccurrence(session.conversationId, schedule.name);
+      }, delayMs);
+      timer.unref?.();
+      this.scheduleTimers.set(key, timer);
+    } catch (error) {
+      this.log(
+        `invalid scheduled cron for ${session.conversationId}/${schedule.name}: ${toErrorMessage(error)}`
+      );
+    }
+  }
+
   syncConversationSchedules(session) {
     this.clearConversationScheduleTimers(session.conversationId);
 
     for (const schedule of session.schedules) {
-      if (schedule.enabled === false) {
-        continue;
-      }
-
-      try {
-        const next = describeNextSchedule(schedule);
-        const delayMs = Math.max(0, next.getTime() - Date.now());
-        const key = this.scheduleKey(session.conversationId, schedule.name);
-        const timer = setTimeout(() => {
-          void this.handleScheduledOccurrence(session.conversationId, schedule.name);
-        }, delayMs);
-        timer.unref?.();
-        this.scheduleTimers.set(key, timer);
-      } catch (error) {
-        this.log(
-          `invalid scheduled cron for ${session.conversationId}/${schedule.name}: ${toErrorMessage(error)}`
-        );
-      }
+      this.syncScheduleTimer(session, schedule);
     }
   }
 
@@ -304,6 +314,8 @@ export class BotRuntime {
     const messageParts = [];
     let failureText = null;
 
+    this.log(`background run starting: ${schedule.name} in ${session.conversationId}`);
+
     const run = session.createAgentRun({
       cli: session.cli,
       workdir: session.workdir,
@@ -339,14 +351,14 @@ export class BotRuntime {
     try {
       const result = await run.done;
       if (result.aborted) {
-        return;
-      }
-
-      if (!failureText && !result.sawTerminalEvent) {
+        failureText = `Background run was aborted before completion.`;
+        this.log(`background run aborted: ${schedule.name} in ${session.conversationId}`);
+      } else if (!failureText && !result.sawTerminalEvent) {
         failureText = `${cliAdapter.displayName} exited without a terminal JSON event.`;
       }
     } catch (error) {
       failureText = `${cliAdapter.displayName} process error: ${toErrorMessage(error)}`;
+      this.log(`background run error: ${schedule.name} in ${session.conversationId}: ${failureText}`);
     } finally {
       this.activeBackgroundRuns.delete(run);
     }
@@ -362,17 +374,27 @@ export class BotRuntime {
         replyTarget: deliveryAnchor?.replyTarget ?? null
       }
     );
+
+    this.log(`background run finished: ${schedule.name} in ${session.conversationId} (failed=${Boolean(failureText)})`);
   }
 
   async handleScheduledOccurrence(conversationId, scheduleName) {
+    this.log(`schedule triggered: ${scheduleName} in ${conversationId}`);
+
     const session = this.sessions.get(String(conversationId));
     if (!session) {
+      this.log(`schedule skipped (no session): ${scheduleName} in ${conversationId}`);
       return;
     }
 
     this.scheduleTimers.delete(this.scheduleKey(conversationId, scheduleName));
     const schedule = session.schedules.find((candidate) => candidate.name === scheduleName);
-    if (!schedule || schedule.enabled === false) {
+    if (!schedule) {
+      this.log(`schedule skipped (not found): ${scheduleName} in ${conversationId}`);
+      return;
+    }
+    if (schedule.enabled === false) {
+      this.log(`schedule skipped (disabled): ${scheduleName} in ${conversationId}`);
       return;
     }
 
@@ -385,7 +407,10 @@ export class BotRuntime {
     } catch (error) {
       this.log(`scheduled run "${scheduleName}" failed in ${conversationId}: ${toErrorMessage(error)}`);
     } finally {
-      this.syncConversationSchedules(session);
+      const nextSchedule = session.schedules.find((candidate) => candidate.name === scheduleName);
+      if (nextSchedule) {
+        this.syncScheduleTimer(session, nextSchedule);
+      }
     }
   }
 

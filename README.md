@@ -194,6 +194,7 @@ Examples:
 /schedule add heartbeat pulse
 */5 * * * *
 check the queue
+/schedule add background news 0 9 * * * summarize overnight updates
 @your_bot_username /auto high
 /auto@your_bot_username high
 /auto @your_bot_username high
@@ -206,12 +207,13 @@ check the queue
 !schedule add background news
 0 9 * * *
 summarize overnight updates
+!schedule add heartbeat pulse */5 * * * * check the queue
 @your_bot_username !auto high
 !auto@your_bot_username high
 !auto @your_bot_username high
 ```
 
-`/schedule add` and `!schedule add` use three or more lines: the first line is `schedule add <heartbeat|background> <name>`, the second line is a five-field cron expression, and the remaining lines are the prompt. `heartbeat` schedules enqueue a normal turn in the chat session. `background` schedules run a fresh agent turn and post a marked notification when finished.
+`/schedule add` and `!schedule add` accept either a multiline form or a single-line form. In multiline form, the first line is `schedule add <heartbeat|background> <name>`, the second line is a five-field cron expression, and the remaining lines are the prompt. In single-line form, put the five cron fields after the name, followed by the prompt. `heartbeat` schedules enqueue a normal turn in the chat session. `background` schedules run a fresh agent turn and post a marked notification when finished.
 
 ## Persistent Deployment With PM2
 

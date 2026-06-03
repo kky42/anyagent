@@ -16,7 +16,8 @@ export function parseScheduleAddArgs(args) {
   const text = String(args ?? "").trim();
   const lines = text.split(/\r?\n/);
   const header = String(lines.shift() ?? "").trim();
-  const [subcommand, mode, rawName, ...rest] = header.split(/\s+/).filter(Boolean);
+  const tokens = header.split(/\s+/).filter(Boolean);
+  const [subcommand, mode, rawName, ...headerRest] = tokens;
 
   if (subcommand !== "add") {
     throw new Error("Use \"schedule add <heartbeat|background> <name>\".");
@@ -25,18 +26,38 @@ export function parseScheduleAddArgs(args) {
     throw new Error("Schedule mode must be \"heartbeat\" or \"background\".");
   }
   const name = validateScheduleName(rawName);
-  const cron = String(lines.shift() ?? "").trim();
-  if (!cron) {
-    throw new Error("Schedule cron is required on the second line.");
-  }
-  parseCronExpression(cron);
-  const prompt = lines.join("\n").trim();
-  if (!prompt) {
-    throw new Error("Schedule prompt is required after the cron line.");
+
+  let cron;
+  let prompt;
+
+  if (headerRest.length >= 5) {
+    // Single-line format: the next 5 tokens form the cron expression,
+    // and everything after is the prompt.
+    cron = headerRest.slice(0, 5).join(" ");
+    prompt = headerRest.slice(5).join(" ").trim();
+    if (lines.length > 0) {
+      const extraPrompt = lines.join("\n").trim();
+      if (extraPrompt) {
+        prompt = prompt ? `${prompt}\n${extraPrompt}` : extraPrompt;
+      }
+    }
+  } else if (headerRest.length === 0) {
+    // Multi-line format: cron on the next line, prompt on remaining lines.
+    cron = String(lines.shift() ?? "").trim();
+    if (!cron) {
+      throw new Error("Schedule cron is required on the second line.");
+    }
+    prompt = lines.join("\n").trim();
+  } else {
+    throw new Error(
+      "Schedule name cannot contain spaces. " +
+      "Put the cron expression on the next line, or provide all 5 cron fields after the name on the same line followed by the prompt."
+    );
   }
 
-  if (rest.length > 0) {
-    throw new Error("Schedule name cannot contain spaces.");
+  parseCronExpression(cron);
+  if (!prompt) {
+    throw new Error("Schedule prompt is required after the cron expression.");
   }
 
   return {
@@ -62,16 +83,26 @@ export function parseScheduleMutationArgs(args, action) {
 export function scheduleCommandHelp(commandName = "schedule") {
   return [
     "Schedule commands:",
-    `- ${commandName} list`,
-    `- ${commandName} add heartbeat <name>`,
+    "List:",
+    `  ${commandName} list`,
+    "",
+    "Add heartbeat:",
+    `  ${commandName} add heartbeat <name>`,
     "  <cron>",
     "  <prompt>",
-    `- ${commandName} add background <name>`,
+    "",
+    "Add background:",
+    `  ${commandName} add background <name>`,
     "  <cron>",
     "  <prompt>",
-    `- ${commandName} remove <name>`,
-    `- ${commandName} enable <name>`,
-    `- ${commandName} disable <name>`
+    "",
+    "Single-line add:",
+    `  ${commandName} add background <name> <5 cron fields> <prompt>`,
+    "",
+    "Manage:",
+    `  ${commandName} remove <name>`,
+    `  ${commandName} enable <name>`,
+    `  ${commandName} disable <name>`
   ].join("\n");
 }
 

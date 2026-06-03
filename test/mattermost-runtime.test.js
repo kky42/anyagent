@@ -592,6 +592,16 @@ test("Mattermost group schedule add preserves multiline addressed command args",
       name: "command token mention",
       scheduleName: "product-command",
       message: "!schedule@relaybot add heartbeat product-command\n*/5 * * * *\ncontinue product design followup"
+    },
+    {
+      name: "slash first argument mention",
+      scheduleName: "product-slash-argument",
+      message: "/schedule @relaybot add heartbeat product-slash-argument\n*/5 * * * *\ncontinue product design followup"
+    },
+    {
+      name: "slash leading mention",
+      scheduleName: "product-slash-leading",
+      message: "@relaybot /schedule add heartbeat product-slash-leading\n*/5 * * * *\ncontinue product design followup"
     }
   ];
 
@@ -631,6 +641,65 @@ test("Mattermost group schedule add preserves multiline addressed command args",
       testCase.name
     );
   }
+});
+
+test("Mattermost same-minute schedules keep sibling timers armed after one schedule fires", async () => {
+  const { runtime, botApi, runnerFactory } = await createRuntime();
+  botApi.channels.set("channel1", { id: "channel1", type: "O" });
+  botApi.users.set("u1", { id: "u1", username: "alice" });
+  const session = runtime.sessionFor("channel1", {
+    deliveryAnchor: {
+      channelId: "channel1",
+      replyTarget: null
+    }
+  });
+  await session.replaceSchedules([
+    {
+      name: "smill",
+      mode: "heartbeat",
+      cron: "*/5 * * * *",
+      prompt: "讲一个中文短笑话",
+      enabled: true
+    },
+    {
+      name: "joke",
+      mode: "background",
+      cron: "*/5 * * * *",
+      prompt: "讲一个 3 句话的科幻故事",
+      enabled: true
+    }
+  ]);
+  runtime.syncConversationSchedules(session);
+
+  const heartbeatKey = runtime.scheduleKey(session.conversationId, "smill");
+  const backgroundKey = runtime.scheduleKey(session.conversationId, "joke");
+  const originalHeartbeatTimer = runtime.scheduleTimers.get(heartbeatKey);
+  const originalBackgroundTimer = runtime.scheduleTimers.get(backgroundKey);
+  assert.ok(originalHeartbeatTimer);
+  assert.ok(originalBackgroundTimer);
+
+  await runtime.handleScheduledOccurrence(session.conversationId, "smill");
+  assert.equal(runtime.scheduleTimers.get(backgroundKey), originalBackgroundTimer);
+  assert.notEqual(runtime.scheduleTimers.get(heartbeatKey), originalHeartbeatTimer);
+
+  const backgroundRunPromise = runtime.handleScheduledOccurrence(session.conversationId, "joke");
+  await waitFor(() => runnerFactory.runs.length === 2, 20);
+  assert.equal(runnerFactory.runs[1].params.sessionId, null);
+  assert.equal(runnerFactory.runs[1].params.message, "讲一个 3 句话的科幻故事");
+
+  await runnerFactory.runs[1].emit({
+    type: "item.completed",
+    item: {
+      type: "agent_message",
+      text: "星舰在木星背面醒来。"
+    }
+  });
+  runnerFactory.runs[1].finish();
+  await backgroundRunPromise;
+  runnerFactory.runs[0].finish();
+
+  assert.match(botApi.posts.at(-1).message, /^Background scheduled run: joke\nTriggered: /);
+  assert.match(botApi.posts.at(-1).message, /星舰在木星背面醒来。/);
 });
 
 test("Mattermost group commands reject trailing targets", async () => {

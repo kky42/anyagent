@@ -17,26 +17,32 @@ function firstToken(text) {
   };
 }
 
-function targetForUsername(username, botUsername) {
+function targetForUsername(username, botUsername, botDisplayName = "") {
   const normalizedUsername = normalizeMattermostUsername(username);
   if (!normalizedUsername) {
     return null;
   }
   const normalizedBotUsername = normalizeMattermostUsername(botUsername);
+  const normalizedBotDisplayName = normalizeMattermostUsername(botDisplayName);
+  const isSelf = Boolean(
+    normalizedBotUsername &&
+    (normalizedUsername === normalizedBotUsername ||
+      (normalizedBotDisplayName && normalizedUsername === normalizedBotDisplayName))
+  );
   return {
-    target: normalizedBotUsername && normalizedUsername === normalizedBotUsername ? "self" : "other",
+    target: isSelf ? "self" : "other",
     username: normalizedUsername
   };
 }
 
-function leadingMentionTarget(text, botUsername) {
+function leadingMentionTarget(text, botUsername, botDisplayName) {
   const trimmed = String(text || "").trim();
   if (!trimmed.startsWith("@")) {
     return null;
   }
 
   const { token, rest } = firstToken(trimmed);
-  const target = targetForUsername(token, botUsername);
+  const target = targetForUsername(token, botUsername, botDisplayName);
   if (!target) {
     return null;
   }
@@ -47,19 +53,19 @@ function leadingMentionTarget(text, botUsername) {
   };
 }
 
-function firstArgTarget(args, botUsername) {
+function firstArgTarget(args, botUsername, botDisplayName) {
   const { token, rest } = firstToken(args);
   if (!token.startsWith("@")) {
     return null;
   }
 
-  const target = targetForUsername(token, botUsername);
+  const target = targetForUsername(token, botUsername, botDisplayName);
   return target ? { ...target, args: rest } : null;
 }
 
-export function parseCommand(text, botUsername) {
+export function parseCommand(text, botUsername, botDisplayName = "") {
   const originalText = String(text || "").trim();
-  const leadingTarget = leadingMentionTarget(originalText, botUsername);
+  const leadingTarget = leadingMentionTarget(originalText, botUsername, botDisplayName);
   const trimmed =
     leadingTarget?.target === "self" || isCommandText(leadingTarget?.text)
       ? leadingTarget.text
@@ -71,7 +77,7 @@ export function parseCommand(text, botUsername) {
   const { token, rest: rawArgs } = firstToken(trimmed);
   const [commandName, mention] = token.slice(1).split("@");
   if (mention) {
-    const target = targetForUsername(mention, botUsername);
+    const target = targetForUsername(mention, botUsername, botDisplayName);
     return {
       command: commandName.toLowerCase(),
       args: rawArgs,
@@ -91,7 +97,7 @@ export function parseCommand(text, botUsername) {
     };
   }
 
-  const argTarget = firstArgTarget(rawArgs, botUsername);
+  const argTarget = firstArgTarget(rawArgs, botUsername, botDisplayName);
   const target = argTarget?.target ?? "none";
   const args = argTarget ? argTarget.args : rawArgs;
 
@@ -104,8 +110,8 @@ export function parseCommand(text, botUsername) {
   };
 }
 
-export async function routeTextMessage({ text, botUsername, session, runtime, replyTarget = null }) {
-  const parsedCommand = parseCommand(text, botUsername);
+export async function routeTextMessage({ text, botUsername, botDisplayName = "", session, runtime, replyTarget = null }) {
+  const parsedCommand = parseCommand(text, botUsername, botDisplayName);
   if (parsedCommand?.ignored) {
     return;
   }
