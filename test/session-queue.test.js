@@ -176,7 +176,7 @@ test("Pi session events update session id, context length, and resume from final
 
 test("abort clears queue but keeps the existing session id", async () => {
   const { session, fakeBotApi, runnerFactory } = await createSession();
-  session.sessionId = "session-keep";
+  await session.updateSessionId("session-keep");
 
   await session.enqueueMessage("first");
   await session.enqueueMessage("second");
@@ -211,7 +211,7 @@ test("new session clears session id and context length without changing runtime 
 
 test("resumed sessions keep the latest context length in memory", async () => {
   const { session, runnerFactory } = await createSession();
-  session.sessionId = "session-existing";
+  await session.updateSessionId("session-existing");
 
   await session.enqueueMessage("resume");
   assert.equal(runnerFactory.runs.length, 1);

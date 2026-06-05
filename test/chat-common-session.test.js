@@ -305,7 +305,7 @@ test("common ChatSession surfaces group output delivery failures as visible rela
 
 test("common ChatSession retries once with a fresh session after resume failure", async () => {
   const { session, output, runnerFactory } = await createCommonSession();
-  session.sessionId = "stale-session";
+  await session.updateSessionId("stale-session");
 
   await session.enqueueMessage("retry me");
   assert.equal(runnerFactory.runs.length, 1);
