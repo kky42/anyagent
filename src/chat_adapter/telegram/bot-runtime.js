@@ -838,12 +838,11 @@ export class BotRuntime {
   }
 
   async stop() {
-    if (!this.polling) {
-      return;
+    if (this.polling) {
+      this.polling = false;
+      this.pollAbortController?.abort();
     }
 
-    this.polling = false;
-    this.pollAbortController?.abort();
     this.mediaGroupBuffer.clear();
     for (const timer of this.scheduleTimers.values()) {
       clearTimeout(timer);

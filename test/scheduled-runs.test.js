@@ -47,6 +47,27 @@ test("allowed non-manager users can manage private schedules", async () => {
   assert.match(fakeBotApi.messages[2].text, /enabled  heartbeat  pulse/);
 });
 
+test("runtime stop clears schedule timers before polling starts", async () => {
+  const { runtime } = await createRuntime();
+  const session = runtime.sessionFor(1001);
+  await session.replaceSchedules([
+    {
+      name: "pulse",
+      mode: "heartbeat",
+      cron: "*/5 * * * *",
+      prompt: "check the queue",
+      enabled: true
+    }
+  ]);
+  runtime.syncConversationSchedules(session);
+
+  assert.equal(runtime.scheduleTimers.size, 1);
+
+  await runtime.stop();
+
+  assert.equal(runtime.scheduleTimers.size, 0);
+});
+
 test("background scheduled runs use a fresh agent turn and emit a marked notification", async () => {
   const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
   const session = runtime.sessionFor(1001, {
