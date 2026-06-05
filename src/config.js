@@ -216,6 +216,7 @@ function normalizeAgentProfile(rawConfig, agentId, filePath) {
     id: agentId,
     cli,
     workdir,
+    profileInstructionsPath: path.join(path.dirname(filePath), "AGENTS.md"),
     auto: normalizeBotAuto(profile, `${filePath}.profile`),
     model: normalizeBotModel(profile, `${filePath}.profile`),
     reasoningEffort: normalizeBotReasoningEffort(profile, `${filePath}.profile`)

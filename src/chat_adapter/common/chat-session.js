@@ -5,6 +5,10 @@ import { formatAuto, parseAutoArgument } from "../../auto-mode.js";
 import { SUPPORTED_AGENT_CLIS, cliAdapterFor } from "../../cli_adapter/index.js";
 import { buildTurnInputMessage } from "../../cli_adapter/turn-input.js";
 import {
+  buildAdditionalSystemPrompt,
+  readProfileInstructions
+} from "./additional-system-prompt.js";
+import {
   normalizeSettingArgument
 } from "../../runtime-settings.js";
 import {
@@ -46,6 +50,39 @@ function ignorePersistenceFailure(promise, logger, label) {
   void promise.catch((error) => {
     logger(`failed to persist ${label}: ${toErrorMessage(error)}`);
   });
+}
+
+function redactDebugArgs(args, promptLength, additionalSystemPromptLength) {
+  const redacted = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--append-system-prompt") {
+      redacted.push(arg);
+      if (index + 1 < args.length) {
+        redacted.push(`<additional-system-prompt:${additionalSystemPromptLength}>`);
+        index += 1;
+      }
+      continue;
+    }
+    if (
+      arg === "-c" &&
+      index + 1 < args.length &&
+      String(args[index + 1]).startsWith("developer_instructions=")
+    ) {
+      redacted.push(
+        arg,
+        `developer_instructions=<additional-system-prompt:${additionalSystemPromptLength}>`
+      );
+      index += 1;
+      continue;
+    }
+    redacted.push(arg);
+  }
+
+  if (redacted.length > 0) {
+    redacted[redacted.length - 1] = `<prompt:${promptLength}>`;
+  }
+  return redacted;
 }
 
 /**
@@ -128,6 +165,10 @@ export class ChatSession {
       this.logger,
       "context length"
     );
+  }
+
+  get additionalSystemPromptSnapshot() {
+    return this.persistence.additionalSystemPromptSnapshot;
   }
 
   get cli() {
@@ -290,8 +331,8 @@ export class ChatSession {
     await fs.rm(this.chatCacheDir(), { recursive: true, force: true });
   }
 
-  updateSessionId(sessionId) {
-    return this.persistence.updateSessionId(sessionId);
+  updateSessionId(sessionId, options = {}) {
+    return this.persistence.updateSessionId(sessionId, options);
   }
 
   updateContextLength(contextLength) {
@@ -576,6 +617,20 @@ export class ChatSession {
     });
   }
 
+  buildFreshAdditionalSystemPrompt(relayInstructions = null) {
+    return buildAdditionalSystemPrompt({
+      profileInstructions: readProfileInstructions(this.bindingConfig.agent),
+      relayInstructions
+    });
+  }
+
+  resolveAdditionalSystemPrompt(relayInstructions = null) {
+    if (this.sessionId) {
+      return this.additionalSystemPromptSnapshot;
+    }
+    return this.buildFreshAdditionalSystemPrompt(relayInstructions);
+  }
+
   async handleReset(options = {}) {
     let reloadedBindingConfig;
     try {
@@ -674,10 +729,29 @@ export class ChatSession {
     const message = nextTurn.groupInput
       ? buildGroupInputMessage(nextTurn.groupInput)
       : buildTurnInputMessage(nextTurn);
-    const developerInstructions = nextTurn.developerInstructions ??
+    const relayInstructions = nextTurn.developerInstructions ??
       (isGroupTurn
         ? buildGroupOutputDeveloperInstructions(nextTurn.groupIdentity ?? {})
         : PRIVATE_OUTPUT_DEVELOPER_INSTRUCTIONS);
+    let developerInstructions;
+    try {
+      developerInstructions = this.resolveAdditionalSystemPrompt(relayInstructions);
+    } catch (error) {
+      await this.renderErrorText(toErrorMessage(error), {
+        replyTarget: nextTurn.replyTarget
+      });
+      this.activeReplyTarget = null;
+      this.isRunning = false;
+      this.stopTyping();
+      this.resetTransientTurnState();
+      if (this.queue.length > 0) {
+        void this.drainQueue();
+      }
+      return;
+    }
+    const additionalSystemPromptSnapshot = this.sessionId
+      ? this.additionalSystemPromptSnapshot
+      : developerInstructions;
     const buildArgParams = {
       sessionId: this.sessionId,
       message,
@@ -691,11 +765,11 @@ export class ChatSession {
       workdir: this.workdir,
       ...buildArgParams
     };
-    const debugArgs = runCliAdapter.buildArgs(buildArgParams);
-    const redactedArgs = debugArgs.slice();
-    if (redactedArgs.length > 0) {
-      redactedArgs[redactedArgs.length - 1] = `<prompt:${message.length}>`;
-    }
+    const redactedArgs = redactDebugArgs(
+      runCliAdapter.buildArgs(buildArgParams),
+      message.length,
+      String(developerInstructions ?? "").length
+    );
     this.logger(
       `starting ${runCliAdapter.id} run ${JSON.stringify({
         sessionId: this.sessionId,
@@ -714,7 +788,9 @@ export class ChatSession {
         for (const action of actions) {
           if (action.kind === "session_started" && action.sessionId) {
             currentSessionId = action.sessionId;
-            await this.updateSessionId(action.sessionId);
+            await this.updateSessionId(action.sessionId, {
+              additionalSystemPromptSnapshot
+            });
             continue;
           }
           if (action.kind === "turn_completed") {

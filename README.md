@@ -113,6 +113,22 @@ Important fields:
 
 If you do not know your Telegram username, send the bot any message once. The unauthorized reply shows the normalized username to add.
 
+### Profile Instructions
+
+Each profile can include an optional `AGENTS.md` file next to `config.json`:
+
+```text
+~/.anyagent/agents/<profile-name>/AGENTS.md
+```
+
+When AnyAgent starts a fresh agent session, it reads that file, appends the relay output contract after it, and stores the combined additional system prompt with the session. The stored prompt is reused for resumed turns instead of rereading `AGENTS.md`.
+
+This is deliberate. Codex keeps the first additional prompt in the resumed session and ignores changed prompt overrides later, while Claude and Pi need the same additional prompt passed again on resumed turns. Reusing the frozen prompt keeps all supported CLIs on the same semantics: edits to `AGENTS.md` affect only new sessions.
+
+Use `/new` to reload `AGENTS.md` for the current chat without resetting chat settings. Use `/reset` to reload the profile config and `AGENTS.md`, clear chat-specific settings, and start a fresh session. Changing `/workdir` or `/cli` also starts a fresh session and reloads profile instructions on the next turn. Background scheduled runs always start fresh, so they read the current profile instructions for each run.
+
+The combined prompt snapshot is stored in AnyAgent local state so resumed Claude and Pi sessions can receive the same prompt after a relay restart. Do not put API tokens or other secrets in profile `AGENTS.md`.
+
 ## Telegram Group Chats
 
 In group chats and supergroups, every non-command message delivered to the bot triggers the agent or joins the next pending agent turn. If multiple unprocessed group messages arrive while the agent is running, AnyAgent sends them to the agent as one plain-text transcript in delivery order, including timestamp, display name, handle, message text, and downloaded attachments next to the message that carried them.
@@ -241,7 +257,7 @@ pm2 restart anyagent
 pm2 stop anyagent
 ```
 
-Restart the relay process to apply global config changes. A process restart reloads all agent profiles and chat bindings from disk, so newly added agents start running, removed agents stop, and changed tokens, workdirs, managers, models, or permission defaults are applied. Chat `/reset` only affects the current chat session; it is not a global relay reload.
+Restart the relay process to apply global config changes. A process restart reloads all agent profiles and chat bindings from disk, so newly added agents start running, removed agents stop, and changed tokens, workdirs, managers, models, or permission defaults are applied. Existing resumed sessions keep their stored additional system prompt; use `/new` or `/reset` to apply `AGENTS.md` changes to a chat. Chat `/reset` only affects the current chat session; it is not a global relay reload.
 
 To update AnyAgent and restart the relay:
 

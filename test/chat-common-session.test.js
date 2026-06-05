@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 
 import { ChatSession } from "../src/chat_adapter/common/chat-session.js";
 import { routeCommandOrTurn } from "../src/chat_adapter/common/command-router.js";
+import { PRIVATE_OUTPUT_DEVELOPER_INSTRUCTIONS } from "../src/chat_adapter/common/output-instructions.js";
 import { createControlledRunnerFactory } from "./support/fakes.js";
 import { waitFor } from "./support/async.js";
 
@@ -257,6 +258,96 @@ test("common ChatSession retries once with a fresh session after resume failure"
     text: "fresh answer",
     options: { replyTarget: null, workdir: "/tmp/project" }
   });
+});
+
+test("common ChatSession freezes combined additional system prompt for a conversation session", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-profile-instructions-"));
+  const profileInstructionsPath = path.join(tempDir, "AGENTS.md");
+  await fs.writeFile(profileInstructionsPath, "first profile instructions", "utf8");
+  const bindingConfig = buildBindingConfig({
+    agent: {
+      id: "primary-agent",
+      cli: "claude",
+      workdir: "/tmp/project",
+      auto: "medium",
+      model: "default",
+      reasoningEffort: "default",
+      profileInstructionsPath
+    }
+  });
+  const { session, runnerFactory, logs } = await createCommonSession({ bindingConfig });
+
+  await session.enqueueMessage("first");
+  await session.enqueueMessage("second");
+
+  const snapshot = runnerFactory.runs[0].params.developerInstructions;
+  assert.match(snapshot, /^# Profile Instructions/);
+  assert.match(snapshot, /first profile instructions/);
+  assert.match(snapshot, /# Relay Output Contract/);
+  assert.match(snapshot, /ATTACH/);
+  assert.ok(snapshot.endsWith(PRIVATE_OUTPUT_DEVELOPER_INSTRUCTIONS));
+  assert.ok(snapshot.indexOf("first profile instructions") < snapshot.indexOf("ATTACH"));
+  assert.doesNotMatch(logs[0], /first profile instructions/);
+
+  await fs.writeFile(profileInstructionsPath, "second profile instructions", "utf8");
+  await runnerFactory.runs[0].emit({
+    type: "system",
+    subtype: "init",
+    session_id: "session-1"
+  });
+  await runnerFactory.runs[0].emit({
+    type: "result"
+  });
+  runnerFactory.runs[0].finish();
+
+  await waitFor(() => runnerFactory.runs.length === 2);
+
+  assert.equal(session.sessionId, "session-1");
+  assert.equal(session.additionalSystemPromptSnapshot, snapshot);
+  assert.equal(runnerFactory.runs[1].params.sessionId, "session-1");
+  assert.equal(runnerFactory.runs[1].params.developerInstructions, snapshot);
+  assert.doesNotMatch(runnerFactory.runs[1].params.developerInstructions, /second profile/);
+});
+
+test("common ChatSession /new reloads profile instructions for the next fresh session", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-profile-new-"));
+  const profileInstructionsPath = path.join(tempDir, "AGENTS.md");
+  await fs.writeFile(profileInstructionsPath, "first profile instructions", "utf8");
+  const bindingConfig = buildBindingConfig({
+    agent: {
+      id: "primary-agent",
+      cli: "codex",
+      workdir: "/tmp/project",
+      auto: "medium",
+      model: "default",
+      reasoningEffort: "default",
+      profileInstructionsPath
+    }
+  });
+  const { session, runnerFactory } = await createCommonSession({ bindingConfig });
+
+  await session.enqueueMessage("first");
+  const firstSnapshot = runnerFactory.runs[0].params.developerInstructions;
+  assert.match(firstSnapshot, /first profile instructions/);
+
+  await runnerFactory.runs[0].emit({
+    type: "thread.started",
+    thread_id: "session-1"
+  });
+  await runnerFactory.runs[0].emit({
+    type: "turn.completed"
+  });
+  runnerFactory.runs[0].finish();
+  await waitFor(() => !session.isRunning);
+
+  await fs.writeFile(profileInstructionsPath, "second profile instructions", "utf8");
+  await session.handleNewSession();
+  await session.enqueueMessage("after new");
+
+  assert.equal(session.sessionId, null);
+  assert.equal(runnerFactory.runs[1].params.sessionId, null);
+  assert.match(runnerFactory.runs[1].params.developerInstructions, /second profile instructions/);
+  assert.doesNotMatch(runnerFactory.runs[1].params.developerInstructions, /first profile/);
 });
 
 test("common ChatSession cache scopes use generic platform and binding ids", async () => {

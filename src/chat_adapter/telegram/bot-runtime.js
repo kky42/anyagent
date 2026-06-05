@@ -324,7 +324,7 @@ export class BotRuntime {
       autoMode: session.auto,
       model: session.model,
       reasoningEffort: session.reasoningEffort,
-      developerInstructions: null,
+      developerInstructions: await session.buildFreshAdditionalSystemPrompt(null),
       onEvent: async (event) => {
         const actions = cliAdapter.eventToActions(event);
         for (const action of actions) {

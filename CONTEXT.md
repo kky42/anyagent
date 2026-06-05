@@ -4,6 +4,14 @@ AnyAgent relays chat conversations to local CLI agents. This glossary names the 
 
 ## Language
 
+**Agent Profile**:
+A named local agent identity that can be bound to chat destinations and owns the default settings used to start **Conversation Sessions**.
+_Avoid_: CLI agent, bot, profile directory
+
+**Profile Instructions**:
+Per-**Agent Profile** guidance that shapes a **Conversation Session** when that session starts fresh.
+_Avoid_: Global system prompt, per-turn prompt, chat instructions
+
 **Conversation**:
 A chat-scoped interaction with its own agent context and settings; Telegram forum topics and Mattermost threads are separate conversations.
 _Avoid_: Chat window, raw chat id, channel

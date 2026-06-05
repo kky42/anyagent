@@ -64,6 +64,10 @@ export class SessionPersistence {
     return this.conversationState.contextLength;
   }
 
+  get additionalSystemPromptSnapshot() {
+    return this.conversationState.additionalSystemPromptSnapshot;
+  }
+
   get cli() {
     return this.conversationState.cli;
   }
@@ -96,8 +100,8 @@ export class SessionPersistence {
     await this.conversationState.updateDeliveryAnchor(deliveryAnchor);
   }
 
-  async updateSessionId(sessionId) {
-    await this.conversationState.updateSessionId(sessionId);
+  async updateSessionId(sessionId, options = {}) {
+    await this.conversationState.updateSessionId(sessionId, options);
   }
 
   async updateContextLength(contextLength) {

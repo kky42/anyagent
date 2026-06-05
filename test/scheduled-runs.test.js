@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -84,6 +87,38 @@ test("background scheduled runs use a fresh agent turn and emit a marked notific
       Math.floor(triggeredAt.getTime() / 1000)
     )}\n\nHere are the headlines.`
   );
+});
+
+test("background scheduled runs load profile instructions for their fresh agent turn", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-schedule-profile-"));
+  const profileInstructionsPath = path.join(tempDir, "AGENTS.md");
+  await fs.writeFile(profileInstructionsPath, "background profile instructions", "utf8");
+  const { runtime, runnerFactory } = await createRuntime({
+    agent: {
+      profileInstructionsPath
+    }
+  });
+  const session = runtime.sessionFor(1001, {
+    deliveryAnchor: {
+      chatId: 1001,
+      replyTarget: null
+    }
+  });
+
+  const backgroundRunPromise = runtime.runBackgroundSchedule(session, {
+    name: "news",
+    mode: "background",
+    cron: "0 * * * *",
+    prompt: "latest stock news",
+    enabled: true
+  });
+  await waitFor(() => runnerFactory.runs.length === 1, 20);
+
+  assert.equal(runnerFactory.runs[0].params.sessionId, null);
+  assert.equal(runnerFactory.runs[0].params.developerInstructions, "background profile instructions");
+
+  runnerFactory.runs[0].finish();
+  await backgroundRunPromise;
 });
 
 test("same-minute schedules keep sibling timers armed after one schedule fires", async () => {

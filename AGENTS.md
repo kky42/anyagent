@@ -119,6 +119,16 @@ npm run test:e2e:agent-behavior
 - For this relay, inject `developer_instructions` only when starting a fresh Codex session.
 - Do not resend `developer_instructions` on `codex exec resume` for an already-bootstrapped session.
 
+## Profile Instruction Snapshots
+
+- Each AnyAgent profile may define `AGENTS.md` next to its `config.json`; this file is profile-scoped, not global.
+- When a Conversation Session starts fresh, combine profile `AGENTS.md` first and the relay output contract last, then persist that exact additional-system-prompt snapshot with the session id.
+- On resumed turns, do not reread `AGENTS.md`. Reuse the persisted snapshot.
+- Codex stores the fresh-session developer instructions in its resumed session and ignores changed `developer_instructions` overrides later, so the Codex adapter still omits developer instructions on resume.
+- Claude Code and Pi do not reliably retain first-turn-only appended prompts, so resumed Claude/Pi turns must receive the same persisted snapshot again.
+- `/new`, `/reset`, `/workdir`, and `/cli` clear the stored session and prompt snapshot; the next fresh turn reloads current `AGENTS.md`.
+- Legacy conversation state that has a session id but no additional-system-prompt snapshot is intentionally invalidated instead of carrying a compatibility path.
+
 ## Release Automation
 
 - npm publishing is handled by GitHub Actions in [`.github/workflows/publish.yml`](.github/workflows/publish.yml).

@@ -21,6 +21,11 @@ function normalizeString(value) {
   return normalized || null;
 }
 
+function normalizePromptSnapshot(value) {
+  const normalized = String(value ?? "");
+  return normalized || null;
+}
+
 function normalizeContextLength(value) {
   if (value === null || value === undefined || value === "") {
     return null;
@@ -117,11 +122,16 @@ function normalizeSession(session) {
 
   const id = normalizeString(session.id);
   const contextLength = normalizeContextLength(session.contextLength);
+  const additionalSystemPromptSnapshot =
+    typeof session.basis?.additionalSystemPromptSnapshot === "string"
+      ? normalizePromptSnapshot(session.basis.additionalSystemPromptSnapshot)
+      : null;
   const basis =
     session.basis && typeof session.basis === "object" && !Array.isArray(session.basis)
       ? {
           cli: normalizeString(session.basis.cli),
-          workdir: normalizeString(session.basis.workdir)
+          workdir: normalizeString(session.basis.workdir),
+          additionalSystemPromptSnapshot
         }
       : null;
 
@@ -345,10 +355,13 @@ export class ConversationState {
         logger(`failed to persist delivery anchor: ${error.message}`);
       }
     }
-    if (state.record.session?.id && state.record.session?.basis) {
+    if (state.record.session?.id) {
+      const basis = state.record.session.basis;
       if (
-        state.record.session.basis.cli !== state.cli ||
-        state.record.session.basis.workdir !== state.workdir
+        !basis ||
+        basis.additionalSystemPromptSnapshot === null ||
+        basis.cli !== state.cli ||
+        basis.workdir !== state.workdir
       ) {
         state.record.session = null;
         try {
@@ -447,6 +460,10 @@ export class ConversationState {
     return this.record.session?.contextLength ?? null;
   }
 
+  get additionalSystemPromptSnapshot() {
+    return this.record.session?.basis?.additionalSystemPromptSnapshot ?? null;
+  }
+
   get schedules() {
     return clone(this.record.schedules) ?? [];
   }
@@ -461,10 +478,15 @@ export class ConversationState {
 
   async invalidateSessionIfBasisChanged() {
     const session = this.record.session;
-    if (!session?.id || !session.basis) {
+    if (!session?.id) {
       return;
     }
-    if (session.basis.cli === this.cli && session.basis.workdir === this.workdir) {
+    if (
+      session.basis &&
+      session.basis.additionalSystemPromptSnapshot !== null &&
+      session.basis.cli === this.cli &&
+      session.basis.workdir === this.workdir
+    ) {
       return;
     }
     this.record.session = null;
@@ -483,7 +505,7 @@ export class ConversationState {
     await this.persist();
   }
 
-  async updateSessionId(sessionId) {
+  async updateSessionId(sessionId, options = {}) {
     const normalized = normalizeString(sessionId);
     if (!normalized) {
       this.record.session = null;
@@ -491,13 +513,20 @@ export class ConversationState {
       return;
     }
 
+    const hasPromptSnapshot = Object.prototype.hasOwnProperty.call(
+      options,
+      "additionalSystemPromptSnapshot"
+    );
     const currentContextLength = this.record.session?.contextLength ?? null;
     this.record.session = {
       id: normalized,
       contextLength: currentContextLength,
       basis: {
         cli: this.cli,
-        workdir: this.workdir
+        workdir: this.workdir,
+        additionalSystemPromptSnapshot: hasPromptSnapshot
+          ? normalizePromptSnapshot(options.additionalSystemPromptSnapshot)
+          : null
       }
     };
     await this.persist();
@@ -514,7 +543,8 @@ export class ConversationState {
         contextLength: normalized,
         basis: {
           cli: this.cli,
-          workdir: this.workdir
+          workdir: this.workdir,
+          additionalSystemPromptSnapshot: null
         }
       };
     } else {

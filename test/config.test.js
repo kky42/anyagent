@@ -51,6 +51,7 @@ test("loadConfig loads agent profiles and telegram bindings", async () => {
   assert.equal(config.agents[0].id, "primary");
   assert.equal(config.agents[0].cli, "codex");
   assert.equal(config.agents[0].workdir, workdir);
+  assert.equal(config.agents[0].profileInstructionsPath, path.join(tempDir, "primary", "AGENTS.md"));
   assert.equal(config.agents[0].auto, "high");
   assert.equal(config.agents[0].model, "default");
   assert.equal(config.agents[0].reasoningEffort, "default");

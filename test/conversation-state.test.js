@@ -57,7 +57,9 @@ test("ConversationState persists delivery anchor, overrides, schedules, and sess
       enabled: true
     }
   ]);
-  await state.updateSessionId("session-1");
+  await state.updateSessionId("session-1", {
+    additionalSystemPromptSnapshot: "frozen prompt"
+  });
   await state.updateContextLength(1234);
 
   const reloaded = ConversationState.loadSync({
@@ -75,6 +77,7 @@ test("ConversationState persists delivery anchor, overrides, schedules, and sess
   assert.equal(reloaded.workdir, "/tmp/project");
   assert.equal(reloaded.sessionId, "session-1");
   assert.equal(reloaded.contextLength, 1234);
+  assert.equal(reloaded.additionalSystemPromptSnapshot, "frozen prompt");
   assert.deepEqual(reloaded.schedules, [
     {
       name: "pulse",
@@ -100,7 +103,9 @@ test("ConversationState.loadSync clears stale session metadata when basis change
     conversationId: "1001",
     stateStore
   });
-  await state.updateSessionId("session-1");
+  await state.updateSessionId("session-1", {
+    additionalSystemPromptSnapshot: "frozen prompt"
+  });
   await state.updateContextLength(4321);
 
   const changedBindingConfig = buildBindingConfig({
@@ -124,4 +129,114 @@ test("ConversationState.loadSync clears stale session metadata when basis change
 
   assert.equal(reloaded.sessionId, null);
   assert.equal(reloaded.contextLength, null);
+});
+
+test("ConversationState.loadSync clears legacy session metadata without a prompt snapshot", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-conversation-state-"));
+  const stateStore = new ConversationStateStore({
+    rootDir: path.join(tempDir, "state")
+  });
+  const bindingConfig = buildBindingConfig();
+  const state = await ConversationState.load({
+    bindingConfig,
+    platform: "telegram",
+    bindingId: "relaybot",
+    conversationId: "1001",
+    stateStore
+  });
+
+  await state.updateSessionId("session-1", {
+    additionalSystemPromptSnapshot: "frozen prompt"
+  });
+
+  const scope = stateStore.scopeFor({
+    agentId: bindingConfig.agent.id,
+    platform: "telegram",
+    bindingId: "relaybot",
+    conversationId: "1001"
+  });
+  const recordPath = stateStore.stateJsonPath(scope);
+  const record = JSON.parse(await fs.readFile(recordPath, "utf8"));
+  delete record.session.basis.additionalSystemPromptSnapshot;
+  await fs.writeFile(recordPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+
+  const reloaded = ConversationState.loadSync({
+    bindingConfig,
+    platform: "telegram",
+    bindingId: "relaybot",
+    conversationId: "1001",
+    stateStore
+  });
+
+  assert.equal(reloaded.sessionId, null);
+  assert.equal(reloaded.additionalSystemPromptSnapshot, null);
+});
+
+test("ConversationState.updateSessionId preserves missing prompt snapshots as null", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-conversation-state-"));
+  const stateStore = new ConversationStateStore({
+    rootDir: path.join(tempDir, "state")
+  });
+  const bindingConfig = buildBindingConfig();
+  const state = await ConversationState.load({
+    bindingConfig,
+    platform: "telegram",
+    bindingId: "relaybot",
+    conversationId: "1001",
+    stateStore
+  });
+
+  await state.updateSessionId("session-1");
+
+  const scope = stateStore.scopeFor({
+    agentId: bindingConfig.agent.id,
+    platform: "telegram",
+    bindingId: "relaybot",
+    conversationId: "1001"
+  });
+  const record = JSON.parse(await fs.readFile(stateStore.stateJsonPath(scope), "utf8"));
+
+  assert.equal(state.additionalSystemPromptSnapshot, null);
+  assert.equal(record.session.basis.additionalSystemPromptSnapshot, null);
+});
+
+test("ConversationState.loadSync clears legacy session metadata with an empty prompt snapshot", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-conversation-state-"));
+  const stateStore = new ConversationStateStore({
+    rootDir: path.join(tempDir, "state")
+  });
+  const bindingConfig = buildBindingConfig();
+  const state = await ConversationState.load({
+    bindingConfig,
+    platform: "telegram",
+    bindingId: "relaybot",
+    conversationId: "1001",
+    stateStore
+  });
+
+  await state.updateSessionId("session-1", {
+    additionalSystemPromptSnapshot: ""
+  });
+
+  const scope = stateStore.scopeFor({
+    agentId: bindingConfig.agent.id,
+    platform: "telegram",
+    bindingId: "relaybot",
+    conversationId: "1001"
+  });
+  const record = JSON.parse(await fs.readFile(stateStore.stateJsonPath(scope), "utf8"));
+
+  assert.equal(state.additionalSystemPromptSnapshot, null);
+  assert.equal(record.session.basis.additionalSystemPromptSnapshot, null);
+
+  const reloaded = ConversationState.loadSync({
+    bindingConfig,
+    platform: "telegram",
+    bindingId: "relaybot",
+    conversationId: "1001",
+    stateStore
+  });
+
+  assert.equal(reloaded.sessionId, null);
+  assert.equal(reloaded.additionalSystemPromptSnapshot, null);
 });
