@@ -6,6 +6,10 @@ import assert from "node:assert/strict";
 
 import { ChatSession } from "../src/chat_adapter/common/chat-session.js";
 import { routeCommandOrTurn } from "../src/chat_adapter/common/command-router.js";
+import {
+  ConversationState,
+  ConversationStateStore
+} from "../src/chat_adapter/common/conversation-state.js";
 import { PRIVATE_OUTPUT_DEVELOPER_INSTRUCTIONS } from "../src/chat_adapter/common/output-instructions.js";
 import { createControlledRunnerFactory } from "./support/fakes.js";
 import { waitFor } from "./support/async.js";
@@ -118,6 +122,49 @@ async function createCommonSession(options = {}) {
   return { session, output, runnerFactory, logs, tempDir };
 }
 
+async function createSessionWithPersistedCliOverride({
+  defaultCli = "claude",
+  overrideCli = "pi",
+  conversationId = "conversation-1"
+} = {}) {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-common-session-"));
+  const bindingConfig = buildBindingConfig({
+    agent: {
+      ...buildBindingConfig().agent,
+      cli: defaultCli
+    }
+  });
+  const stateStore = new ConversationStateStore({
+    rootDir: path.join(tempDir, "state")
+  });
+  const state = await ConversationState.load({
+    bindingConfig,
+    platform: bindingConfig.platform,
+    bindingId: bindingConfig.bindingId,
+    conversationId,
+    stateStore
+  });
+  await state.applyRuntimeSettings({ cli: overrideCli });
+
+  const output = new FakeChatOutput();
+  const runnerFactory = createControlledRunnerFactory();
+  const logs = [];
+  const session = new ChatSession({
+    bindingConfig,
+    output,
+    logger: (message) => logs.push(message),
+    platform: bindingConfig.platform,
+    bindingId: bindingConfig.bindingId,
+    conversationId,
+    cacheRootDir: path.join(tempDir, "cache"),
+    stateStore,
+    createAgentRun: (params) => runnerFactory.createRun(params),
+    resolveContextLength: async () => 3456
+  });
+
+  return { session, output, runnerFactory, logs, tempDir };
+}
+
 test("common ChatSession owns queueing, run orchestration, and opaque reply targets", async () => {
   const { session, output, runnerFactory, logs } = await createCommonSession();
   const replyTarget = { channelId: "channel-1", rootId: "post-root" };
@@ -180,6 +227,41 @@ test("common ChatSession owns queueing, run orchestration, and opaque reply targ
   assert.equal(output.stopTypingCount, 1);
   assert.match(logs[0], /starting codex run/);
   assert.equal(runnerFactory.runs[1].params.sessionId, "session-1");
+});
+
+test("common ChatSession restores the CLI adapter from durable CLI overrides", async () => {
+  const { session, runnerFactory, logs } = await createSessionWithPersistedCliOverride({
+    defaultCli: "claude",
+    overrideCli: "pi"
+  });
+
+  assert.equal(session.cli, "pi");
+  assert.equal(session.cliAdapter.id, "pi");
+
+  await session.enqueueMessage("hello after restart");
+  await waitFor(() => runnerFactory.runs.length === 1);
+
+  assert.equal(runnerFactory.runs[0].params.cli, "pi");
+  assert.match(logs[0], /starting pi run/);
+
+  runnerFactory.runs[0].finish();
+  await waitFor(() => !session.isRunning);
+});
+
+test("/cli compares the requested CLI with the restored effective CLI", async () => {
+  const { session, output } = await createSessionWithPersistedCliOverride({
+    defaultCli: "claude",
+    overrideCli: "pi"
+  });
+
+  await session.handleCli("claude");
+
+  assert.equal(session.cli, "claude");
+  assert.equal(session.cliAdapter.id, "claude");
+  assert.equal(
+    output.texts.at(-1).text,
+    "CLI set to claude. Started a new session. The next message will open a fresh Claude session."
+  );
 });
 
 test("common ChatSession surfaces group output delivery failures as visible relay errors", async () => {

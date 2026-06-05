@@ -141,6 +141,17 @@ export class ChatSession {
         }),
       logger: this.logger
     });
+    this.syncCliAdapterWithEffectiveCli();
+  }
+
+  syncCliAdapterWithEffectiveCli() {
+    this.cliAdapter = cliAdapterFor(this.cli);
+    if (this.usesDefaultRunFactory) {
+      this.createAgentRun = (params) => this.cliAdapter.startRun(params);
+    }
+    if (this.usesDefaultContextLengthResolver) {
+      this.resolveContextLength = this.cliAdapter.resolveContextLength;
+    }
   }
 
   get sessionId() {
@@ -347,16 +358,20 @@ export class ChatSession {
     return this.persistence.clearSessionState();
   }
 
-  resetChatToBindingDefaults() {
-    return this.persistence.resetChatToBindingDefaults();
+  async resetChatToBindingDefaults() {
+    await this.persistence.resetChatToBindingDefaults();
+    this.syncCliAdapterWithEffectiveCli();
   }
 
   resetChatToBotDefaults() {
     return this.resetChatToBindingDefaults();
   }
 
-  applyRuntimeSettings(patch) {
-    return this.persistence.applyRuntimeSettings(patch);
+  async applyRuntimeSettings(patch) {
+    await this.persistence.applyRuntimeSettings(patch);
+    if (Object.prototype.hasOwnProperty.call(patch ?? {}, "cli")) {
+      this.syncCliAdapterWithEffectiveCli();
+    }
   }
 
   replaceSchedules(schedules) {
@@ -437,7 +452,7 @@ export class ChatSession {
   async handleCli(args, options = {}) {
     const normalizedCli = normalizeSettingArgument(args)?.toLowerCase();
     if (!normalizedCli) {
-      await this.sendText(`Current CLI: ${this.cliAdapter.id}.`, options);
+      await this.sendText(`Current CLI: ${this.cli}.`, options);
       return;
     }
 
@@ -446,20 +461,13 @@ export class ChatSession {
       return;
     }
 
-    if (normalizedCli === this.cliAdapter.id) {
+    if (normalizedCli === this.cli) {
       await this.sendText(`CLI is already set to ${normalizedCli}.`, options);
       return;
     }
 
     await prepareForSessionReset(this);
     await this.applyRuntimeSettings({ cli: normalizedCli });
-    this.cliAdapter = cliAdapterFor(this.cli);
-    if (this.usesDefaultRunFactory) {
-      this.createAgentRun = (params) => this.cliAdapter.startRun(params);
-    }
-    if (this.usesDefaultContextLengthResolver) {
-      this.resolveContextLength = this.cliAdapter.resolveContextLength;
-    }
     await this.clearSessionState();
 
     await this.sendText(
@@ -643,13 +651,6 @@ export class ChatSession {
     await prepareForSessionReset(this);
     Object.assign(this.bindingConfig, reloadedBindingConfig);
     this.botConfig = this.bindingConfig;
-    this.cliAdapter = cliAdapterFor(this.bindingConfig.agent?.cli);
-    if (this.usesDefaultRunFactory) {
-      this.createAgentRun = (params) => this.cliAdapter.startRun(params);
-    }
-    if (this.usesDefaultContextLengthResolver) {
-      this.resolveContextLength = this.cliAdapter.resolveContextLength;
-    }
     await this.resetChatToBindingDefaults();
 
     await this.sendText(
@@ -721,6 +722,7 @@ export class ChatSession {
     let currentSessionId = this.sessionId;
     let completedTurn = false;
     let resumeFailureMessage = null;
+    this.syncCliAdapterWithEffectiveCli();
     const runCli = this.cli;
     const runCliAdapter = this.cliAdapter;
     const isGroupTurn = nextTurn.mode === "group";
