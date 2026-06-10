@@ -6,6 +6,9 @@ import {
 export const NOOP_CONFIG_STORE = {
   async loadChatBindingConfig() {
     throw new Error("Config reload is unavailable.");
+  },
+  async loadAgentProfile() {
+    throw new Error("Config reload is unavailable.");
   }
 };
 
@@ -114,6 +117,10 @@ export class SessionPersistence {
 
   async resetChatToBindingDefaults() {
     await this.conversationState.resetChatToBindingDefaults();
+  }
+
+  async resetChatToAgentProfileDefaults(options = {}) {
+    await this.conversationState.resetChatToAgentProfileDefaults(options);
   }
 
   async resetChatToBotDefaults() {

@@ -44,7 +44,11 @@ export async function routeCommandOrTurn({
       await runtime.handleScheduleCommand(session, args, { replyTarget });
       return;
     case "reset":
-      await session.handleReset({ replyTarget });
+      if (typeof runtime?.handleConversationReset === "function") {
+        await runtime.handleConversationReset(session, { replyTarget });
+      } else {
+        await session.handleReset({ replyTarget });
+      }
       return;
     default:
       if (command) {
@@ -94,7 +98,11 @@ export async function routeKnownCommand({
       await runtime.handleScheduleCommand(session, args, { replyTarget });
       return true;
     case "reset":
-      await session.handleReset({ replyTarget });
+      if (typeof runtime?.handleConversationReset === "function") {
+        await runtime.handleConversationReset(session, { replyTarget });
+      } else {
+        await session.handleReset({ replyTarget });
+      }
       return true;
     default:
       return false;

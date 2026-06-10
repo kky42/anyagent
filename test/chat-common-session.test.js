@@ -450,22 +450,20 @@ test("common ChatSession cache scopes use generic platform and binding ids", asy
   assert.equal(scope.scopeKey, "primary-agent:futurechat:workspace-a:channel:abc");
 });
 
-test("common ChatSession reset reloads through generic chat binding config", async () => {
+test("common ChatSession reset reloads agent profile defaults", async () => {
   const nextWorkdir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-common-reset-"));
   const calls = [];
   const configStore = {
-    async loadChatBindingConfig(args) {
+    async loadAgentProfile(args) {
       calls.push(args);
-      return buildBindingConfig({
-        agent: {
-          id: "primary-agent",
-          cli: "claude",
-          workdir: nextWorkdir,
-          auto: "high",
-          model: "gpt-5.4-mini",
-          reasoningEffort: "high"
-        }
-      });
+      return {
+        id: "primary-agent",
+        cli: "claude",
+        workdir: nextWorkdir,
+        auto: "high",
+        model: "gpt-5.4-mini",
+        reasoningEffort: "high"
+      };
     }
   };
   const { session, output } = await createCommonSession({ configStore });
@@ -478,9 +476,7 @@ test("common ChatSession reset reloads through generic chat binding config", asy
 
   assert.deepEqual(calls, [
     {
-      platform: "testchat",
-      agentId: "primary-agent",
-      bindingId: "workspace-main"
+      agentId: "primary-agent"
     }
   ]);
   assert.equal(session.cliAdapter.id, "claude");
@@ -490,7 +486,7 @@ test("common ChatSession reset reloads through generic chat binding config", asy
   assert.equal(session.reasoningEffort, "high");
   assert.equal(session.sessionId, null);
   assert.equal(session.contextLength, null);
-  assert.match(output.texts.at(-1).text, /Reset current chat to config defaults/);
+  assert.match(output.texts.at(-1).text, /Reset this conversation to current agent profile defaults/);
   assert.deepEqual(output.texts.at(-1).options, { replyTarget: { channelId: "channel-1" } });
 });
 

@@ -4,8 +4,9 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { waitFor } from "./support/async.js";
+import { flush, waitFor } from "./support/async.js";
 import { createRuntime } from "./support/builders.js";
+import { AgentOperationLocks } from "../src/control/operation-locks.js";
 import { formatLocalTimestamp } from "../src/utils.js";
 
 function buildTextMessage(text, username = "AllowedUser", chatId = 1001, overrides = {}) {
@@ -66,6 +67,95 @@ test("runtime stop clears schedule timers before polling starts", async () => {
   await runtime.stop();
 
   assert.equal(runtime.scheduleTimers.size, 0);
+});
+
+test("scheduled occurrences paused by agent reset are dropped after runtime stop", async () => {
+  const operationLocks = new AgentOperationLocks();
+  const { runtime, runnerFactory } = await createRuntime();
+  runtime.operationLocks = operationLocks;
+  const session = runtime.sessionFor(1001, {
+    deliveryAnchor: {
+      chatId: 1001,
+      replyTarget: null
+    }
+  });
+  await session.replaceSchedules([
+    {
+      name: "news",
+      mode: "background",
+      cron: "0 * * * *",
+      prompt: "latest stock news",
+      enabled: true
+    }
+  ]);
+  runtime.syncConversationSchedules(session);
+  assert.equal(runtime.scheduleTimers.size, 1);
+
+  let releaseLock;
+  const lockPromise = operationLocks.runExclusive("primary-agent", async () => {
+    await new Promise((resolve) => {
+      releaseLock = resolve;
+    });
+  });
+  await waitFor(() => typeof releaseLock === "function", 20);
+
+  const occurrencePromise = runtime.handleScheduledOccurrence(session.conversationId, "news");
+  await flush();
+  runtime.requestStop();
+  releaseLock();
+  await lockPromise;
+  await occurrencePromise;
+
+  assert.equal(runnerFactory.runs.length, 0);
+  assert.equal(runtime.scheduleTimers.size, 0);
+});
+
+test("scheduled occurrences paused by agent reset keep restored timers when superseded", async () => {
+  const operationLocks = new AgentOperationLocks();
+  const { runtime, runnerFactory } = await createRuntime();
+  runtime.operationLocks = operationLocks;
+  const session = runtime.sessionFor(1001, {
+    deliveryAnchor: {
+      chatId: 1001,
+      replyTarget: null
+    }
+  });
+  await session.replaceSchedules([
+    {
+      name: "news",
+      mode: "background",
+      cron: "0 * * * *",
+      prompt: "latest stock news",
+      enabled: true
+    }
+  ]);
+  runtime.syncConversationSchedules(session);
+  const key = runtime.scheduleKey(session.conversationId, "news");
+  const staleTimer = runtime.scheduleTimers.get(key);
+  assert.ok(staleTimer);
+
+  let releaseLock;
+  const lockPromise = operationLocks.runExclusive("primary-agent", async () => {
+    await new Promise((resolve) => {
+      releaseLock = resolve;
+    });
+  });
+  await waitFor(() => typeof releaseLock === "function", 20);
+
+  const occurrencePromise = runtime.handleScheduledOccurrence(session.conversationId, "news", staleTimer);
+  await flush();
+  runtime.syncConversationSchedules(session);
+  const restoredTimer = runtime.scheduleTimers.get(key);
+  assert.ok(restoredTimer);
+  assert.notEqual(restoredTimer, staleTimer);
+
+  releaseLock();
+  await lockPromise;
+  await occurrencePromise;
+
+  assert.equal(runnerFactory.runs.length, 0);
+  assert.equal(runtime.scheduleTimers.get(key), restoredTimer);
+  await runtime.stop();
 });
 
 test("background scheduled runs use a fresh agent turn and emit a marked notification", async () => {

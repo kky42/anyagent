@@ -152,6 +152,7 @@ export class FakeConfigStore {
     this.loads = [];
     this.loadFailure = null;
     this.loadedBotConfig = loadedBotConfig;
+    this.loadedAgentProfile = null;
   }
 
   async loadTelegramBotConfig({ agentId, username }) {
@@ -185,6 +186,24 @@ export class FakeConfigStore {
     }
     this.loads.push({ platform, agentId, bindingId });
     return structuredClone(this.loadedBotConfig);
+  }
+
+  async loadAgentProfile({ agentId }) {
+    if (this.loadFailure) {
+      throw this.loadFailure;
+    }
+    this.loads.push({ agentId });
+    return structuredClone(
+      this.loadedAgentProfile ??
+        this.loadedBotConfig?.agent ?? {
+          id: agentId,
+          cli: "codex",
+          workdir: "/tmp/project",
+          auto: "medium",
+          model: "default",
+          reasoningEffort: "default"
+        }
+    );
   }
 }
 

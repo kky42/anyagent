@@ -8,6 +8,10 @@ AnyAgent relays chat conversations to local CLI agents. This glossary names the 
 A named local agent identity that can be bound to chat destinations and owns the default settings used to start **Conversation Sessions**.
 _Avoid_: CLI agent, bot, profile directory
 
+**Chat Binding**:
+The association between an **Agent Profile** and a chat destination that lets AnyAgent receive and deliver conversation turns through a chat platform.
+_Avoid_: Binding info, bot config
+
 **Profile Instructions**:
 Per-**Agent Profile** guidance that shapes a **Conversation Session** when that session starts fresh.
 _Avoid_: Global system prompt, per-turn prompt, chat instructions
@@ -39,6 +43,14 @@ _Avoid_: Tool feedback, ordinary agent reasoning
 **Conversation Session**:
 The resumable front-agent context attached to a **Conversation** and used by normal user turns and **Heartbeat Scheduled Turns**.
 _Avoid_: Background session, one-off run
+
+**Conversation Reset**:
+A reset of one **Conversation** that starts its next **Conversation Session** fresh using current **Agent Profile** defaults without changing its **Chat Binding**.
+_Avoid_: Chat-session reset
+
+**Agent Profile Reset**:
+A reset that refreshes **Chat Bindings** for one **Agent Profile** and applies reset behavior to all known **Conversations** historically associated with that profile, including both **Live Conversation State** and **Durable Conversation State**.
+_Avoid_: Agent reset, global reset
 
 **Delivery Anchor**:
 The platform-specific destination details needed to deliver output back into the same **Conversation**, such as a private chat, group topic, or thread.

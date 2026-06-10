@@ -62,6 +62,11 @@ test("ConfigStore reloads a telegram bot binding from config.json", async () => 
   assert.equal(bindingConfig.platform, "telegram");
   assert.equal(bindingConfig.bindingId, "relaybot");
   assert.equal(bindingConfig.agent.id, "primary");
+
+  const agentProfile = await configStore.loadAgentProfile({ agentId: "primary" });
+  assert.equal(agentProfile.id, "primary");
+  assert.equal(agentProfile.workdir, workdir);
+  assert.equal(agentProfile.auto, "high");
 });
 
 test("ConfigStore reloads a mattermost bot binding from config.json", async () => {

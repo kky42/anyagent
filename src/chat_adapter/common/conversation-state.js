@@ -253,7 +253,7 @@ export class ConversationStateStore {
     await writeJsonFileAtomic(this.stateJsonPath(scope), normalizedRecord);
   }
 
-  async loadBindingRecords({ agentId, platform, bindingId }, options = {}) {
+  async loadMatchingRecords(matchesScope, options = {}) {
     const onError = options.onError ?? (() => {});
     let entries = [];
     try {
@@ -284,11 +284,7 @@ export class ConversationStateStore {
           bindingId: scopeJson.bindingId,
           conversationId: scopeJson.conversationId
         });
-        if (
-          scope.agentId !== agentId ||
-          scope.platform !== platform ||
-          scope.bindingId !== bindingId
-        ) {
+        if (!matchesScope(scope)) {
           continue;
         }
         const stateJson = await readJsonFile(stateJsonPath, null);
@@ -300,6 +296,25 @@ export class ConversationStateStore {
     }
 
     return records;
+  }
+
+  async loadBindingRecords({ agentId, platform, bindingId }, options = {}) {
+    return this.loadMatchingRecords(
+      (scope) =>
+        scope.agentId === agentId &&
+        scope.platform === platform &&
+        scope.bindingId === bindingId,
+      options
+    );
+  }
+
+  async loadAgentRecords({ agentId }, options = {}) {
+    const normalizedAgentId = normalizeString(agentId);
+    if (!normalizedAgentId) {
+      throw new Error("agent id must be a non-empty string");
+    }
+
+    return this.loadMatchingRecords((scope) => scope.agentId === normalizedAgentId, options);
   }
 }
 
@@ -559,6 +574,15 @@ export class ConversationState {
   }
 
   async resetChatToBindingDefaults() {
+    this.record.session = null;
+    this.record.overrides = {};
+    await this.persist();
+  }
+
+  async resetChatToAgentProfileDefaults({ reloadDurableState = false } = {}) {
+    if (reloadDurableState) {
+      this.record = await this.stateStore.loadRecord(this.scope);
+    }
     this.record.session = null;
     this.record.overrides = {};
     await this.persist();

@@ -125,7 +125,7 @@ When AnyAgent starts a fresh agent session, it reads that file, appends the rela
 
 This is deliberate. Codex keeps the first additional prompt in the resumed session and ignores changed prompt overrides later, while Claude and Pi need the same additional prompt passed again on resumed turns. Reusing the frozen prompt keeps all supported CLIs on the same semantics: edits to `AGENTS.md` affect only new sessions.
 
-Use `/new` to reload `AGENTS.md` for the current chat without resetting chat settings. Use `/reset` to reload the profile config and `AGENTS.md`, clear chat-specific settings, and start a fresh session. Changing `/workdir` or `/cli` also starts a fresh session and reloads profile instructions on the next turn. Background scheduled runs always start fresh, so they read the current profile instructions for each run.
+Use `/new` to reload `AGENTS.md` for the current chat without resetting chat settings. Use `/reset` to reload the current Agent Profile defaults and `AGENTS.md`, clear chat-specific settings, reload saved schedules for that conversation, and start a fresh session. Chat `/reset` does not reload or change the chat binding fields such as bot username, token, server URL, or manager lists. Changing `/workdir` or `/cli` also starts a fresh session and reloads profile instructions on the next turn. Background scheduled runs always start fresh, so they read the current profile instructions for each run.
 
 The combined prompt snapshot is stored in AnyAgent local state so resumed Claude and Pi sessions can receive the same prompt after a relay restart. Do not put API tokens or other secrets in profile `AGENTS.md`.
 
@@ -194,7 +194,7 @@ All chat commands require a manager username. In direct/private chats, the bot t
 | `/reasoning` | `!reasoning` | Show or change reasoning effort. |
 | `/abort` | `!abort` | Stop the active run and clear queued messages. |
 | `/new` | `!new` | Start a fresh agent session for this chat. |
-| `/reset` | `!reset` | Reload config defaults for this chat and clear chat-specific overrides. |
+| `/reset` | `!reset` | Reload Agent Profile defaults for this chat, reload saved schedules, and clear chat-specific overrides. |
 | `/clear_cache` | `!clear_cache` | Delete cached attachments for this chat. |
 | `/schedule` | `!schedule` | List or manage scheduled runs for this chat. |
 
@@ -231,6 +231,21 @@ summarize overnight updates
 
 `/schedule add` and `!schedule add` accept either a multiline form or a single-line form. In multiline form, the first line is `schedule add <heartbeat|background> <name>`, the second line is a five-field cron expression, and the remaining lines are the prompt. In single-line form, put the five cron fields after the name, followed by the prompt. `heartbeat` schedules enqueue a normal turn in the chat session. `background` schedules run a fresh agent turn and post a marked notification when finished.
 
+## CLI Reset
+
+Reset can also be driven from the CLI while the relay is running:
+
+```bash
+anyagent reset --agent main
+anyagent reset --agent main --platform telegram --binding your_bot_username --conversation-id 123456789
+```
+
+`anyagent reset --agent <id>` performs an Agent Profile Reset. It reloads that profile and reconciles its chat bindings in the running relay, including added, removed, changed, and moved bindings. It resets live conversations and durable-only conversations historically associated with the profile, preserves schedule definitions, aborts active foreground and background runs, and resyncs timers for active bindings.
+
+The conversation form has the same effect as sending `/reset` or `!reset` in that conversation. It requires the full selector: agent, platform, binding, and conversation id.
+
+CLI reset is online-only. The relay starts a loopback control endpoint and writes a per-config control file under `~/.anyagent/run/`; the CLI reads the local bearer token from that file automatically. Users do not pass the token manually, and there is no offline state mutation fallback.
+
 ## Persistent Deployment With PM2
 
 For always-on usage, install AnyAgent globally and run it with PM2:
@@ -257,7 +272,7 @@ pm2 restart anyagent
 pm2 stop anyagent
 ```
 
-Restart the relay process to apply global config changes. A process restart reloads all agent profiles and chat bindings from disk, so newly added agents start running, removed agents stop, and changed tokens, workdirs, managers, models, or permission defaults are applied. Existing resumed sessions keep their stored additional system prompt; use `/new` or `/reset` to apply `AGENTS.md` changes to a chat. Chat `/reset` only affects the current chat session; it is not a global relay reload.
+Restart the relay process to apply all global config changes at once. A process restart reloads all agent profiles and chat bindings from disk, so newly added agents start running, removed agents stop, and changed tokens, workdirs, managers, models, or permission defaults are applied. For one running profile, `anyagent reset --agent <id>` can apply those binding/profile changes without a full relay restart. Existing resumed sessions keep their stored additional system prompt; use `/new` or `/reset` to apply `AGENTS.md` changes to a chat. Chat `/reset` only affects the current chat session; it is not a global relay reload.
 
 To update AnyAgent and restart the relay:
 

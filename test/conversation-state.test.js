@@ -89,6 +89,111 @@ test("ConversationState persists delivery anchor, overrides, schedules, and sess
   ]);
 });
 
+test("ConversationStateStore loads durable records by historical agent id", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-conversation-state-"));
+  const stateStore = new ConversationStateStore({
+    rootDir: path.join(tempDir, "state")
+  });
+
+  const primaryConfig = buildBindingConfig();
+  const otherConfig = buildBindingConfig({
+    agent: {
+      ...buildBindingConfig().agent,
+      id: "other-agent"
+    }
+  });
+
+  await ConversationState.load({
+    bindingConfig: primaryConfig,
+    platform: "telegram",
+    bindingId: "relaybot",
+    conversationId: "1001",
+    stateStore
+  }).then((state) => state.updateSessionId("session-telegram"));
+
+  await ConversationState.load({
+    bindingConfig: primaryConfig,
+    platform: "mattermost",
+    bindingId: "localhost:8065:relaybot",
+    conversationId: "channel-1",
+    stateStore
+  }).then((state) => state.updateSessionId("session-mattermost"));
+
+  await ConversationState.load({
+    bindingConfig: otherConfig,
+    platform: "telegram",
+    bindingId: "otherbot",
+    conversationId: "2002",
+    stateStore
+  }).then((state) => state.updateSessionId("session-other"));
+
+  const records = await stateStore.loadAgentRecords({ agentId: "primary-agent" });
+  assert.deepEqual(
+    records.map(({ scope }) => scope.scopeKey).sort(),
+    [
+      "primary-agent:mattermost:localhost:8065:relaybot:channel-1",
+      "primary-agent:telegram:relaybot:1001"
+    ]
+  );
+});
+
+test("ConversationStateStore loadAgentRecords reports corrupt durable records and keeps scanning", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-conversation-state-"));
+  const stateStore = new ConversationStateStore({
+    rootDir: path.join(tempDir, "state")
+  });
+  const bindingConfig = buildBindingConfig();
+
+  await ConversationState.load({
+    bindingConfig,
+    platform: "telegram",
+    bindingId: "relaybot",
+    conversationId: "1001",
+    stateStore
+  }).then((state) => state.updateSessionId("session-good"));
+
+  const corruptStateScope = stateStore.scopeFor({
+    agentId: "primary-agent",
+    platform: "telegram",
+    bindingId: "relaybot",
+    conversationId: "bad-state"
+  });
+  await fs.mkdir(stateStore.scopeDir(corruptStateScope), { recursive: true });
+  await fs.writeFile(
+    stateStore.scopeJsonPath(corruptStateScope),
+    `${JSON.stringify({
+      agentId: "primary-agent",
+      platform: "telegram",
+      bindingId: "relaybot",
+      conversationId: "bad-state"
+    })}\n`,
+    "utf8"
+  );
+  await fs.writeFile(stateStore.stateJsonPath(corruptStateScope), "{", "utf8");
+
+  const corruptScopeDir = path.join(stateStore.rootDir, "bad-scope");
+  await fs.mkdir(corruptScopeDir, { recursive: true });
+  await fs.writeFile(path.join(corruptScopeDir, "scope.json"), "{", "utf8");
+
+  const errors = [];
+  const records = await stateStore.loadAgentRecords(
+    { agentId: "primary-agent" },
+    {
+      onError: (error, details) => {
+        errors.push({ error, details });
+      }
+    }
+  );
+
+  assert.deepEqual(
+    records.map(({ scope }) => scope.conversationId),
+    ["1001"]
+  );
+  assert.equal(errors.length, 2);
+  assert.ok(errors.some(({ details }) => details.stateJsonPath === stateStore.stateJsonPath(corruptStateScope)));
+  assert.ok(errors.some(({ details }) => details.scopeJsonPath === path.join(corruptScopeDir, "scope.json")));
+});
+
 test("ConversationState.loadSync clears stale session metadata when basis changes", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-conversation-state-"));
   const stateStore = new ConversationStateStore({

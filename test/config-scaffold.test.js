@@ -112,6 +112,51 @@ test("anyagent add creates an agent config through the CLI", async () => {
   assert.match(writes.join(""), /Created agent "main"/);
 });
 
-test("anyagent reset is not a supported CLI command", async () => {
-  await assert.rejects(() => main(["reset"]), /Unknown command: reset/);
+test("anyagent reset requires an agent selector", async () => {
+  await assert.rejects(() => main(["reset"]), /reset requires --agent <agent-name>/);
+});
+
+test("anyagent reset rejects partial conversation selectors", async () => {
+  await assert.rejects(
+    () => main(["reset", "--agent", "main", "--conversation-id", "1001"]),
+    /Conversation reset requires --agent, --platform, --binding, and --conversation-id/
+  );
+});
+
+test("anyagent reset help prints usage", async () => {
+  const writes = [];
+  const originalWrite = process.stdout.write;
+  process.stdout.write = function write(chunk, ...args) {
+    writes.push(String(chunk));
+    if (typeof args.at(-1) === "function") {
+      args.at(-1)();
+    }
+    return true;
+  };
+
+  try {
+    await main(["reset", "--help"]);
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+
+  const output = writes.join("");
+  assert.match(output, /Usage:/);
+  assert.match(output, /anyagent .* reset --agent <agent-name>/);
+});
+
+test("anyagent reset is online-only", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-reset-cli-"));
+  await assert.rejects(
+    () => main(["--config", tempDir, "reset", "--agent", "main"]),
+    /AnyAgent relay is not running/
+  );
+});
+
+test("anyagent reset accepts --config after the command", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-reset-cli-"));
+  await assert.rejects(
+    () => main(["reset", "--config", tempDir, "--agent", "main"]),
+    /AnyAgent relay is not running/
+  );
 });

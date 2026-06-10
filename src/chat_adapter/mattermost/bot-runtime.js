@@ -98,7 +98,8 @@ export class BotRuntime {
     cacheRootDir = DEFAULT_CACHE_PATH,
     stateRootDir = null,
     watchdogIntervalMs = DEFAULT_WATCHDOG_INTERVAL_MS,
-    staleWebSocketMs = DEFAULT_STALE_WEBSOCKET_MS
+    staleWebSocketMs = DEFAULT_STALE_WEBSOCKET_MS,
+    operationLocks = null
   }) {
     this.botConfig = botConfig;
     this.configStore = configStore;
@@ -131,6 +132,7 @@ export class BotRuntime {
     this.pendingWebSocket = null;
     this.scheduleTimers = new Map();
     this.activeBackgroundRuns = new Set();
+    this.operationLocks = operationLocks;
     this.lastWsOpenAt = null;
     this.lastWsActivityAt = null;
     this.lastWsMessageAt = null;
@@ -202,7 +204,7 @@ export class BotRuntime {
       const next = describeNextSchedule(schedule);
       const delayMs = Math.max(0, next.getTime() - Date.now());
       const timer = setTimeout(() => {
-        void this.handleScheduledOccurrence(session.conversationId, schedule.name);
+        void this.handleScheduledOccurrence(session.conversationId, schedule.name, timer);
       }, delayMs);
       timer.unref?.();
       this.scheduleTimers.set(key, timer);
@@ -357,6 +359,10 @@ export class BotRuntime {
       }
     });
     this.activeBackgroundRuns.add(run);
+    let resolveBackgroundDone;
+    run.backgroundDone = new Promise((resolve) => {
+      resolveBackgroundDone = resolve;
+    });
 
     try {
       const result = await run.done;
@@ -369,26 +375,44 @@ export class BotRuntime {
     } catch (error) {
       failureText = `${cliAdapter.displayName} process error: ${toErrorMessage(error)}`;
       this.log(`background run error: ${schedule.name} in ${session.conversationId}: ${failureText}`);
-    } finally {
-      this.activeBackgroundRuns.delete(run);
     }
 
-    await session.sendText(
-      buildBackgroundNotificationText({
-        scheduleName: schedule.name,
-        triggeredAt,
-        failed: Boolean(failureText),
-        body: failureText ?? messageParts.join("\n\n")
-      }),
-      {
-        replyTarget: deliveryAnchor?.replyTarget ?? null
+    try {
+      if (run.suppressBackgroundNotification) {
+        this.log(`background run notification suppressed: ${schedule.name} in ${session.conversationId}`);
+        return;
       }
-    );
 
-    this.log(`background run finished: ${schedule.name} in ${session.conversationId} (failed=${Boolean(failureText)})`);
+      await session.sendText(
+        buildBackgroundNotificationText({
+          scheduleName: schedule.name,
+          triggeredAt,
+          failed: Boolean(failureText),
+          body: failureText ?? messageParts.join("\n\n")
+        }),
+        {
+          replyTarget: deliveryAnchor?.replyTarget ?? null
+        }
+      );
+
+      this.log(`background run finished: ${schedule.name} in ${session.conversationId} (failed=${Boolean(failureText)})`);
+    } finally {
+      this.activeBackgroundRuns.delete(run);
+      resolveBackgroundDone();
+    }
   }
 
-  async handleScheduledOccurrence(conversationId, scheduleName) {
+  async handleScheduledOccurrence(conversationId, scheduleName, expectedTimer = null) {
+    await this.waitForAgentOperation();
+    if (!this.isActive()) {
+      this.log(`schedule skipped (runtime stopped): ${scheduleName} in ${conversationId}`);
+      return;
+    }
+    const scheduleTimerKey = this.scheduleKey(conversationId, scheduleName);
+    if (expectedTimer && this.scheduleTimers.get(scheduleTimerKey) !== expectedTimer) {
+      this.log(`schedule skipped (timer superseded): ${scheduleName} in ${conversationId}`);
+      return;
+    }
     this.log(`schedule triggered: ${scheduleName} in ${conversationId}`);
 
     const session = this.sessions.get(String(conversationId));
@@ -397,7 +421,7 @@ export class BotRuntime {
       return;
     }
 
-    this.scheduleTimers.delete(this.scheduleKey(conversationId, scheduleName));
+    this.scheduleTimers.delete(scheduleTimerKey);
     const schedule = session.schedules.find((candidate) => candidate.name === scheduleName);
     if (!schedule) {
       this.log(`schedule skipped (not found): ${scheduleName} in ${conversationId}`);
@@ -573,7 +597,7 @@ export class BotRuntime {
     return Boolean(username && managerUsernames.includes(username));
   }
 
-  async initialize() {
+  async initialize({ restoreScheduledConversations = true } = {}) {
     const me = await this.botApi.getMe();
     this.botUsername = String(me.username ?? "").trim().toLowerCase();
     this.botUserId = String(me.id ?? "").trim();
@@ -584,7 +608,9 @@ export class BotRuntime {
       );
     }
     this.log(`ready as @${this.botUsername} for agent ${this.botConfig.agent.id} with workdir ${this.botConfig.agent.workdir}`);
-    await this.restoreScheduledConversations();
+    if (restoreScheduledConversations) {
+      await this.restoreScheduledConversations();
+    }
   }
 
   groupIdentity() {
@@ -595,10 +621,60 @@ export class BotRuntime {
     };
   }
 
+  async waitForAgentOperation() {
+    await this.operationLocks?.wait(this.botConfig.agent.id);
+  }
+
+  isActive() {
+    return !this.stopRequested;
+  }
+
+  requestStop() {
+    this.stopRequested = true;
+    this.running = false;
+    this.wakeConnectionLoop?.();
+    this.pendingWebSocket?.close?.();
+    this.pendingWebSocket = null;
+    this.websocket?.close?.();
+    this.websocket = null;
+    for (const timer of this.scheduleTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.scheduleTimers.clear();
+  }
+
+  async abortBackgroundRuns({ suppressNotification = false } = {}) {
+    const backgroundRuns = [...this.activeBackgroundRuns];
+    for (const run of backgroundRuns) {
+      if (suppressNotification) {
+        run.suppressBackgroundNotification = true;
+      }
+      run.abort?.();
+    }
+    await Promise.allSettled(
+      backgroundRuns.map((run) => (run.backgroundDone ?? run.done).catch(() => null))
+    );
+    return backgroundRuns.length;
+  }
+
   async resetSessions() {
     await Promise.all([...this.sessions.values()].map((session) =>
       resetSession(session, { clearSessionState: true })
     ));
+  }
+
+  async handleConversationReset(session, options = {}) {
+    const reset = async () => {
+      const result = await session.handleReset(options);
+      if (result?.ok) {
+        this.syncConversationSchedules(session);
+      }
+      return result;
+    };
+    if (this.operationLocks) {
+      return this.operationLocks.runExclusive(this.botConfig.agent.id, reset);
+    }
+    return reset();
   }
 
   async sendDirectMessage(channelId, text) {
@@ -635,6 +711,10 @@ export class BotRuntime {
   }
 
   async handleEvent(event) {
+    await this.waitForAgentOperation();
+    if (!this.isActive()) {
+      return;
+    }
     let post = postFromWebSocketEvent(event);
     if (!post || isDeletedPost(post) || isBotPost(post, this.botUserId)) {
       return;
@@ -870,12 +950,12 @@ export class BotRuntime {
     });
   }
 
-  async start() {
+  async start({ restoreScheduledConversations = true } = {}) {
     if (this.running) {
       return;
     }
     this.stopRequested = false;
-    await this.initialize();
+    await this.initialize({ restoreScheduledConversations });
     this.running = true;
     this.connectPromise = (async () => {
       while (!this.stopRequested) {
@@ -900,22 +980,8 @@ export class BotRuntime {
   }
 
   async stop() {
-    this.stopRequested = true;
-    this.running = false;
-    this.wakeConnectionLoop?.();
-    this.pendingWebSocket?.close?.();
-    this.pendingWebSocket = null;
-    this.websocket?.close?.();
-    this.websocket = null;
-    for (const timer of this.scheduleTimers.values()) {
-      clearTimeout(timer);
-    }
-    this.scheduleTimers.clear();
-    const backgroundRuns = [...this.activeBackgroundRuns];
-    for (const run of backgroundRuns) {
-      run.abort?.();
-    }
-    await Promise.allSettled(backgroundRuns.map((run) => run.done.catch(() => null)));
+    this.requestStop();
+    await this.abortBackgroundRuns({ suppressNotification: true });
     for (const session of this.sessions.values()) {
       session.queue = [];
       session.stopTyping();

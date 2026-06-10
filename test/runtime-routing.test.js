@@ -1013,6 +1013,6 @@ test("runtime routes /reset to the current chat session only", async () => {
   assert.equal(session.reasoningEffort, "high");
   assert.equal(
     fakeBotApi.messages.at(-1).text,
-    `Reset current chat to config defaults. Started a new session with CLI claude, workdir ${nextWorkdir}, auto medium, model default, reasoning effort high.`
+    `Reset this conversation to current agent profile defaults. Started a new session with CLI claude, workdir ${nextWorkdir}, auto medium, model default, reasoning effort high.`
   );
 });

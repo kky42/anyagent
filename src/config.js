@@ -403,6 +403,11 @@ export function findChatBindingConfig(config, { platform, agentId, bindingId }) 
   );
 }
 
+export function findAgentProfile(config, { agentId }) {
+  const normalizedAgentId = normalizeAgentId(agentId, "agent id");
+  return config.agents.find((agent) => agent.id === normalizedAgentId) ?? null;
+}
+
 export function findTelegramBotConfig(config, { agentId, username }) {
   return findChatBindingConfig(config, {
     platform: "telegram",

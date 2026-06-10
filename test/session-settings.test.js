@@ -198,7 +198,7 @@ test("/model and /reasoning update the current chat only", async () => {
   assert.equal(runnerFactory.runs[0].params.reasoningEffort, "high");
 });
 
-test("/reset reloads config defaults, clears chat overrides, and starts a new session", async () => {
+test("/reset reloads agent profile defaults, clears chat overrides, and starts a new session", async () => {
   const nextWorkdir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-reset-"));
   const { session, fakeBotApi, configStore } = await createSession({
     botConfig: {
@@ -247,7 +247,7 @@ test("/reset reloads config defaults, clears chat overrides, and starts a new se
   assert.equal(configStore.loads.length, 1);
   assert.equal(
     fakeBotApi.messages.at(-1).text,
-    `Reset current chat to config defaults. Started a new session with CLI claude, workdir ${nextWorkdir}, auto high, model gpt-5.4-mini, reasoning effort high.`
+    `Reset this conversation to current agent profile defaults. Started a new session with CLI claude, workdir ${nextWorkdir}, auto high, model gpt-5.4-mini, reasoning effort high.`
   );
 });
 
@@ -262,5 +262,5 @@ test("/reset leaves the session untouched when config reload fails", async () =>
 
   assert.equal(session.sessionId, "session-old");
   assert.equal(session.contextLength, 1200);
-  assert.equal(fakeBotApi.messages.at(-1).text, "Failed to reload bot config: config parse failed");
+  assert.equal(fakeBotApi.messages.at(-1).text, "Failed to reload agent profile: config parse failed");
 });

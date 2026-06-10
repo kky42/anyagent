@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { BotRuntime } from "../src/chat_adapter/mattermost/bot-runtime.js";
 import { flush, waitFor } from "./support/async.js";
 import { createControlledRunnerFactory, FakeConfigStore } from "./support/fakes.js";
+import { AgentOperationLocks } from "../src/control/operation-locks.js";
 
 class FakeMattermostApi {
   constructor() {
@@ -525,6 +526,40 @@ test("Mattermost group channels trigger every post and use separate sessions for
   assert.equal(botApi.posts[0].message, "group done");
 });
 
+test("Mattermost events paused by agent reset are dropped after runtime stop", async () => {
+  const operationLocks = new AgentOperationLocks();
+  const { runtime, botApi, runnerFactory } = await createRuntime();
+  runtime.operationLocks = operationLocks;
+  botApi.channels.set("dm1", { id: "dm1", type: "D" });
+  botApi.users.set("u1", { id: "u1", username: "alice" });
+
+  let releaseLock;
+  const lockPromise = operationLocks.runExclusive("primary-agent", async () => {
+    await new Promise((resolve) => {
+      releaseLock = resolve;
+    });
+  });
+  await waitFor(() => typeof releaseLock === "function", 20);
+
+  const eventPromise = runtime.handleEvent(postedEvent({
+    id: "post1",
+    channel_id: "dm1",
+    user_id: "u1",
+    message: "hello after reset",
+    create_at: 1000,
+    file_ids: []
+  }));
+  await flush();
+  runtime.requestStop();
+  releaseLock();
+  await lockPromise;
+  await eventPromise;
+
+  assert.equal(runtime.sessions.size, 0);
+  assert.equal(runnerFactory.runs.length, 0);
+  assert.equal(botApi.posts.length, 0);
+});
+
 test("Mattermost group addressed commands use the common command router", async () => {
   const { runtime, botApi, runnerFactory } = await createRuntime();
   botApi.channels.set("channel1", { id: "channel1", type: "O" });
@@ -700,6 +735,54 @@ test("Mattermost same-minute schedules keep sibling timers armed after one sched
 
   assert.match(botApi.posts.at(-1).message, /^Background scheduled run: joke\nTriggered: /);
   assert.match(botApi.posts.at(-1).message, /星舰在木星背面醒来。/);
+});
+
+test("Mattermost scheduled occurrences paused by agent reset keep restored timers when superseded", async () => {
+  const operationLocks = new AgentOperationLocks();
+  const { runtime, runnerFactory } = await createRuntime();
+  runtime.operationLocks = operationLocks;
+  const session = runtime.sessionFor("channel1", {
+    deliveryAnchor: {
+      channelId: "channel1",
+      replyTarget: null
+    }
+  });
+  await session.replaceSchedules([
+    {
+      name: "news",
+      mode: "background",
+      cron: "0 * * * *",
+      prompt: "latest stock news",
+      enabled: true
+    }
+  ]);
+  runtime.syncConversationSchedules(session);
+  const key = runtime.scheduleKey(session.conversationId, "news");
+  const staleTimer = runtime.scheduleTimers.get(key);
+  assert.ok(staleTimer);
+
+  let releaseLock;
+  const lockPromise = operationLocks.runExclusive("primary-agent", async () => {
+    await new Promise((resolve) => {
+      releaseLock = resolve;
+    });
+  });
+  await waitFor(() => typeof releaseLock === "function", 20);
+
+  const occurrencePromise = runtime.handleScheduledOccurrence(session.conversationId, "news", staleTimer);
+  await flush();
+  runtime.syncConversationSchedules(session);
+  const restoredTimer = runtime.scheduleTimers.get(key);
+  assert.ok(restoredTimer);
+  assert.notEqual(restoredTimer, staleTimer);
+
+  releaseLock();
+  await lockPromise;
+  await occurrencePromise;
+
+  assert.equal(runnerFactory.runs.length, 0);
+  assert.equal(runtime.scheduleTimers.get(key), restoredTimer);
+  await runtime.stop();
 });
 
 test("Mattermost group commands reject trailing targets", async () => {

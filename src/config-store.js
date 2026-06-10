@@ -1,6 +1,11 @@
 import path from "node:path";
 
-import { findChatBindingConfig, findTelegramBotConfig, loadConfig } from "./config.js";
+import {
+  findAgentProfile,
+  findChatBindingConfig,
+  findTelegramBotConfig,
+  loadConfig
+} from "./config.js";
 
 export class ConfigStore {
   constructor(configPath) {
@@ -16,6 +21,15 @@ export class ConfigStore {
       );
     }
     return structuredClone(bindingConfig);
+  }
+
+  async loadAgentProfile({ agentId }) {
+    const config = await loadConfig(this.configPath);
+    const agent = findAgentProfile(config, { agentId });
+    if (!agent) {
+      throw new Error(`Agent profile "${agentId}" not found in ${this.configPath}`);
+    }
+    return structuredClone(agent);
   }
 
   async loadTelegramBotConfig({ agentId, username }) {

@@ -363,6 +363,11 @@ export class ChatSession {
     this.syncCliAdapterWithEffectiveCli();
   }
 
+  async resetChatToAgentProfileDefaults(options = {}) {
+    await this.persistence.resetChatToAgentProfileDefaults(options);
+    this.syncCliAdapterWithEffectiveCli();
+  }
+
   resetChatToBotDefaults() {
     return this.resetChatToBindingDefaults();
   }
@@ -625,6 +630,17 @@ export class ChatSession {
     });
   }
 
+  async reloadAgentProfile() {
+    return this.configStore.loadAgentProfile({
+      agentId: this.bindingConfig.agent.id
+    });
+  }
+
+  applyAgentProfileDefaults(agentProfile) {
+    this.bindingConfig.agent = structuredClone(agentProfile);
+    this.botConfig = this.bindingConfig;
+  }
+
   buildFreshAdditionalSystemPrompt(relayInstructions = null) {
     return buildAdditionalSystemPrompt({
       profileInstructions: readProfileInstructions(this.bindingConfig.agent),
@@ -639,24 +655,33 @@ export class ChatSession {
     return this.buildFreshAdditionalSystemPrompt(relayInstructions);
   }
 
-  async handleReset(options = {}) {
-    let reloadedBindingConfig;
-    try {
-      reloadedBindingConfig = await this.reloadBindingConfig();
-    } catch (error) {
-      await this.sendText(`Failed to reload bot config: ${toErrorMessage(error)}`, options);
-      return;
+  async resetToAgentProfileDefaults({ agentProfile = null } = {}) {
+    let reloadedAgentProfile = agentProfile;
+    if (!reloadedAgentProfile) {
+      try {
+        reloadedAgentProfile = await this.reloadAgentProfile();
+      } catch (error) {
+        return {
+          ok: false,
+          text: `Failed to reload agent profile: ${toErrorMessage(error)}`
+        };
+      }
     }
 
     await prepareForSessionReset(this);
-    Object.assign(this.bindingConfig, reloadedBindingConfig);
-    this.botConfig = this.bindingConfig;
-    await this.resetChatToBindingDefaults();
+    this.applyAgentProfileDefaults(reloadedAgentProfile);
+    await this.resetChatToAgentProfileDefaults({ reloadDurableState: true });
 
-    await this.sendText(
-      `Reset current chat to config defaults. Started a new session with CLI ${this.cli}, workdir ${this.workdir}, auto ${formatAuto(this.auto)}, model ${this.model}, reasoning effort ${this.reasoningEffort}.`,
-      options
-    );
+    return {
+      ok: true,
+      text: `Reset this conversation to current agent profile defaults. Started a new session with CLI ${this.cli}, workdir ${this.workdir}, auto ${formatAuto(this.auto)}, model ${this.model}, reasoning effort ${this.reasoningEffort}.`
+    };
+  }
+
+  async handleReset(options = {}) {
+    const result = await this.resetToAgentProfileDefaults();
+    await this.sendText(result.text, options);
+    return result;
   }
 
   async enqueueTurn(turn) {
