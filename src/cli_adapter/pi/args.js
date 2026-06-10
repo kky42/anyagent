@@ -55,6 +55,7 @@ export function buildPiArgs({
 
   return [
     "-p",
+    "--approve",
     "--mode",
     "json",
     ...sandboxArgs,

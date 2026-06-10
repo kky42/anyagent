@@ -13,23 +13,25 @@ import {
 import { PRIVATE_OUTPUT_DEVELOPER_INSTRUCTIONS } from "../src/chat_adapter/common/output-instructions.js";
 import { createFakeCliCommand } from "./support/fakes.js";
 
-test("buildPiArgs uses print json mode for a fresh session", () => {
+test("buildPiArgs uses approved print json mode for a fresh session", () => {
   assert.deepEqual(buildPiArgs({
     message: "hello"
   }), [
     "-p",
+    "--approve",
     "--mode",
     "json",
     "hello"
   ]);
 });
 
-test("buildPiArgs resumes an existing session", () => {
+test("buildPiArgs resumes an existing session with project approval", () => {
   assert.deepEqual(buildPiArgs({
     sessionId: "019e227d-4508-74ed-acd1-9d990c98b99d",
     message: "continue"
   }), [
     "-p",
+    "--approve",
     "--mode",
     "json",
     "--session",
@@ -45,6 +47,7 @@ test("buildPiArgs maps auto modes to pi-sandbox flags only when supported", () =
     supportsSandboxFlag: true
   }), [
     "-p",
+    "--approve",
     "--mode",
     "json",
     "--sandbox",
@@ -58,6 +61,7 @@ test("buildPiArgs maps auto modes to pi-sandbox flags only when supported", () =
     supportsSandboxFlag: true
   }), [
     "-p",
+    "--approve",
     "--mode",
     "json",
     "--sandbox",
@@ -71,6 +75,7 @@ test("buildPiArgs maps auto modes to pi-sandbox flags only when supported", () =
     supportsSandboxFlag: true
   }), [
     "-p",
+    "--approve",
     "--mode",
     "json",
     "--sandbox",
@@ -84,6 +89,7 @@ test("buildPiArgs maps auto modes to pi-sandbox flags only when supported", () =
     supportsSandboxFlag: false
   }), [
     "-p",
+    "--approve",
     "--mode",
     "json",
     "hello"
@@ -105,6 +111,7 @@ test("buildPiArgs appends model, thinking, and attachment contract", () => {
 
   assert.deepEqual(freshArgs, [
     "-p",
+    "--approve",
     "--mode",
     "json",
     "--model",
@@ -117,6 +124,7 @@ test("buildPiArgs appends model, thinking, and attachment contract", () => {
   ]);
   assert.deepEqual(resumedArgs, [
     "-p",
+    "--approve",
     "--mode",
     "json",
     "--append-system-prompt",
@@ -170,6 +178,7 @@ process.stdout.write(JSON.stringify({
     const output = JSON.parse(chunks.join("").trim());
     assert.deepEqual(output.args, [
       "-p",
+      "--approve",
       "--mode",
       "json",
       "--sandbox",
