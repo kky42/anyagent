@@ -37,6 +37,80 @@ test("sendText falls back to plain text when Telegram HTML and Markdown parsing 
   ]);
 });
 
+test("sendText uses Telegram rich Markdown when available", async () => {
+  const fakeBotApi = new FakeBotApi({ supportsRichMessages: true });
+  const { session } = await createSession({ fakeBotApi });
+
+  await session.sendText("| A | B |\n| --- | --- |\n| 1 | 2 |");
+
+  assert.equal(fakeBotApi.richMessages.length, 1);
+  assert.deepEqual(fakeBotApi.richMessages[0], {
+    chatId: 1001,
+    richMessage: {
+      markdown: "| A | B |\n| --- | --- |\n| 1 | 2 |"
+    },
+    text: "| A | B |\n| --- | --- |\n| 1 | 2 |"
+  });
+});
+
+test("rich final agent_message deletes the transient progress message instead of editing it", async () => {
+  const fakeBotApi = new FakeBotApi({ supportsRichMessages: true });
+  const { session, runnerFactory } = await createSession({ fakeBotApi });
+
+  await session.enqueueMessage("first");
+  const run = runnerFactory.runs[0];
+
+  await run.emit({
+    type: "item.started",
+    item: {
+      id: "item_1",
+      type: "reasoning",
+      status: "in_progress"
+    }
+  });
+  await run.emit({
+    type: "item.completed",
+    item: {
+      id: "item_2",
+      type: "agent_message",
+      text: "# Done\n\n| A | B |\n| --- | --- |\n| 1 | 2 |"
+    }
+  });
+  run.finish();
+
+  await flush();
+  await flush();
+
+  assert.equal(fakeBotApi.richMessages.at(-1).richMessage.markdown, "# Done\n\n| A | B |\n| --- | --- |\n| 1 | 2 |");
+  assert.deepEqual(fakeBotApi.deletions, [{ chatId: 1001, messageId: 1 }]);
+  assert.deepEqual(fakeBotApi.edits, []);
+});
+
+test("private progress uses Telegram rich message drafts when available", async () => {
+  const fakeBotApi = new FakeBotApi({ supportsRichDrafts: true });
+  const { session, runnerFactory } = await createSession({ fakeBotApi });
+
+  await session.enqueueMessage("first");
+  const run = runnerFactory.runs[0];
+
+  await run.emit({
+    type: "item.started",
+    item: {
+      id: "item_1",
+      type: "reasoning",
+      status: "in_progress"
+    }
+  });
+
+  assert.equal(fakeBotApi.richDrafts.length, 1);
+  assert.equal(fakeBotApi.richDrafts[0].chatId, 1001);
+  assert.match(fakeBotApi.richDrafts[0].richMessage.html, /<tg-thinking>🟢 reasoning<\/tg-thinking>/);
+  assert.deepEqual(fakeBotApi.messages, []);
+
+  run.finish();
+  await flush();
+});
+
 test("progress items reuse one Telegram message and final agent_message replaces it", async () => {
   const { session, fakeBotApi, runnerFactory } = await createSession();
 

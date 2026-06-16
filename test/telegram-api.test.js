@@ -175,6 +175,141 @@ test("sendMessage retries with direct-message topic routing when Telegram reject
   );
 });
 
+test("sendRichMessage sends rich markdown payloads", async () => {
+  const calls = [];
+  const api = new TelegramBotApi("token", async (url, options) => {
+    calls.push({
+      url,
+      payload: JSON.parse(options.body)
+    });
+
+    return {
+      ok: true,
+      async json() {
+        return {
+          ok: true,
+          result: { message_id: 8 }
+        };
+      }
+    };
+  });
+
+  const result = await api.sendRichMessage({
+    chatId: 1001,
+    markdown: "| A | B |\n| --- | --- |\n| 1 | 2 |",
+    skipEntityDetection: true,
+    messageThreadId: 11,
+    directMessagesTopicId: 22
+  });
+
+  assert.deepEqual(calls, [
+    {
+      url: "https://api.telegram.org/bottoken/sendRichMessage",
+      payload: {
+        chat_id: 1001,
+        rich_message: {
+          markdown: "| A | B |\n| --- | --- |\n| 1 | 2 |",
+          skip_entity_detection: true
+        },
+        message_thread_id: 11
+      }
+    }
+  ]);
+  assert.deepEqual(result, { message_id: 8 });
+});
+
+test("sendRichMessage retries with direct-message topic routing", async () => {
+  const calls = [];
+  const api = new TelegramBotApi("token", async (url, options) => {
+    const payload = JSON.parse(options.body);
+    calls.push(payload);
+
+    if (calls.length === 1) {
+      return {
+        ok: false,
+        async json() {
+          return {
+            ok: false,
+            error_code: 400,
+            description: "Bad Request: message thread not found"
+          };
+        }
+      };
+    }
+
+    return {
+      ok: true,
+      async json() {
+        return {
+          ok: true,
+          result: { message_id: 8 }
+        };
+      }
+    };
+  });
+
+  await api.sendRichMessage({
+    chatId: 1001,
+    markdown: "hello",
+    messageThreadId: 11
+  });
+
+  assert.deepEqual(calls, [
+    {
+      chat_id: 1001,
+      rich_message: { markdown: "hello" },
+      message_thread_id: 11
+    },
+    {
+      chat_id: 1001,
+      rich_message: { markdown: "hello" },
+      direct_messages_topic_id: 11
+    }
+  ]);
+});
+
+test("sendRichMessageDraft sends ephemeral rich draft payloads", async () => {
+  const calls = [];
+  const api = new TelegramBotApi("token", async (url, options) => {
+    calls.push({
+      url,
+      payload: JSON.parse(options.body)
+    });
+
+    return {
+      ok: true,
+      async json() {
+        return {
+          ok: true,
+          result: true
+        };
+      }
+    };
+  });
+
+  const result = await api.sendRichMessageDraft({
+    chatId: 1001,
+    draftId: 123,
+    html: "<tg-thinking>Working</tg-thinking>",
+    messageThreadId: 11
+  });
+
+  assert.deepEqual(calls, [
+    {
+      url: "https://api.telegram.org/bottoken/sendRichMessageDraft",
+      payload: {
+        chat_id: 1001,
+        draft_id: 123,
+        rich_message: {
+          html: "<tg-thinking>Working</tg-thinking>"
+        },
+        message_thread_id: 11
+      }
+    }
+  ]);
+  assert.equal(result, true);
+});
+
 test("getFile sends the Telegram getFile payload", async () => {
   const calls = [];
   const api = new TelegramBotApi("token", async (url, options) => {

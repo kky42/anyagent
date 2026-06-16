@@ -13,6 +13,7 @@ import { ChatSession, replyTargetFromTelegramMessage } from "./chat-session.js";
 import { parseCommand, routeKnownTextCommand } from "./command-router.js";
 import { renderGroupInputMessage } from "./group-input.js";
 import { MediaGroupBuffer } from "./media-group-buffer.js";
+import { telegramMessageText } from "./rich-message.js";
 import {
   allowedInPrivateForAllowedUser
 } from "../common/command-router.js";
@@ -54,6 +55,87 @@ function missingTargetMessage(botUsername) {
   return `Group commands must mention this bot, for example /status ${suffix}.`;
 }
 
+function inlineValue(value) {
+  return String(value ?? "").replace(/\s*\r?\n\s*/g, " ").trim();
+}
+
+function markdownKeyValues(rows) {
+  return rows.map(([key, value]) => `- **${key}:** ${inlineValue(value)}`).join("\n");
+}
+
+function buildTelegramScheduleHelpMarkdown(commandName = "/schedule") {
+  return [
+    "# Schedule Commands",
+    "",
+    "- List schedules:",
+    `  - \`${commandName} list\``,
+    "- Add heartbeat:",
+    `  - \`${commandName} add heartbeat <name>\``,
+    "  - next line: `<cron>`",
+    "  - remaining lines: `<prompt>`",
+    "- Add background:",
+    `  - \`${commandName} add background <name>\``,
+    "  - next line: `<cron>`",
+    "  - remaining lines: `<prompt>`",
+    "- Single-line add:",
+    `  - \`${commandName} add background <name> <5 cron fields> <prompt>\``,
+    "- Manage:",
+    `  - \`${commandName} remove <name>\``,
+    `  - \`${commandName} enable <name>\``,
+    `  - \`${commandName} disable <name>\``
+  ].join("\n");
+}
+
+function buildTelegramScheduleListMarkdown(schedules) {
+  if (!Array.isArray(schedules) || schedules.length === 0) {
+    return "No schedules.";
+  }
+
+  const blocks = [...schedules]
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((schedule) => {
+      const status = schedule.enabled === false ? "disabled" : "enabled";
+      let next = "disabled";
+      if (schedule.enabled !== false) {
+        try {
+          next = formatLocalTimestamp(Math.floor(describeNextSchedule(schedule).getTime() / 1000));
+        } catch {
+          next = "invalid cron";
+        }
+      }
+      return [
+        `- **${inlineValue(schedule.name)}** (${inlineValue(schedule.mode)}, ${status})`,
+        `  - cron: \`${inlineValue(schedule.cron)}\``,
+        `  - next: ${inlineValue(next)}`
+      ].join("\n");
+    });
+
+  return ["# Schedules", "", blocks.join("\n")].join("\n");
+}
+
+function buildTelegramScheduleConfirmationMarkdown(action, schedule) {
+  const rows = [];
+  if (schedule.mode) {
+    rows.push(["mode", schedule.mode]);
+  }
+  if (schedule.cron) {
+    rows.push(["cron", schedule.cron]);
+  }
+  return [
+    `**${action} schedule \"${schedule.name}\".**`,
+    rows.length ? "" : null,
+    rows.length ? markdownKeyValues(rows) : null
+  ].filter(Boolean).join("\n");
+}
+
+async function sendRichOrText(session, markdown, fallbackText, options = {}) {
+  if (typeof session.sendRichText === "function") {
+    await session.sendRichText(markdown, { ...options, fallbackText });
+    return;
+  }
+  await session.sendText(fallbackText, options);
+}
+
 const IGNORED_SERVICE_MESSAGE_FIELDS = [
   "forum_topic_created",
   "forum_topic_closed",
@@ -68,13 +150,7 @@ function isIgnoredServiceMessage(message) {
 }
 
 function messageText(message) {
-  if (typeof message?.text === "string") {
-    return message.text;
-  }
-  if (typeof message?.caption === "string") {
-    return message.caption;
-  }
-  return "";
+  return telegramMessageText(message);
 }
 
 function groupLikeConversationId(message) {
@@ -442,7 +518,12 @@ export class BotRuntime {
   async handleScheduleCommand(session, args, options = {}) {
     const trimmedArgs = String(args ?? "").trim();
     if (!trimmedArgs) {
-      await session.sendText(scheduleCommandHelp("/schedule"), options);
+      await sendRichOrText(
+        session,
+        buildTelegramScheduleHelpMarkdown("/schedule"),
+        scheduleCommandHelp("/schedule"),
+        options
+      );
       return;
     }
 
@@ -451,7 +532,12 @@ export class BotRuntime {
 
     try {
       if (action === "list") {
-        await session.sendText(buildScheduleListText(schedules), options);
+        await sendRichOrText(
+          session,
+          buildTelegramScheduleListMarkdown(schedules),
+          buildScheduleListText(schedules),
+          options
+        );
         return;
       }
 
@@ -462,7 +548,12 @@ export class BotRuntime {
         }
         await session.replaceSchedules([...schedules, { ...schedule, enabled: true }]);
         this.syncConversationSchedules(session);
-        await session.sendText(buildScheduleConfirmation("Added", schedule), options);
+        await sendRichOrText(
+          session,
+          buildTelegramScheduleConfirmationMarkdown("Added", schedule),
+          buildScheduleConfirmation("Added", schedule),
+          options
+        );
         return;
       }
 
@@ -475,7 +566,12 @@ export class BotRuntime {
         await session.replaceSchedules(schedules.filter((candidate) => candidate.name !== name));
         session.removeQueuedScheduledTurns(name);
         this.syncConversationSchedules(session);
-        await session.sendText(buildScheduleConfirmation("Removed", schedule), options);
+        await sendRichOrText(
+          session,
+          buildTelegramScheduleConfirmationMarkdown("Removed", schedule),
+          buildScheduleConfirmation("Removed", schedule),
+          options
+        );
         return;
       }
 
@@ -494,7 +590,12 @@ export class BotRuntime {
           session.removeQueuedScheduledTurns(name);
         }
         this.syncConversationSchedules(session);
-        await session.sendText(
+        await sendRichOrText(
+          session,
+          buildTelegramScheduleConfirmationMarkdown(enabled ? "Enabled" : "Disabled", {
+            ...schedule,
+            enabled
+          }),
           buildScheduleConfirmation(enabled ? "Enabled" : "Disabled", {
             ...schedule,
             enabled
@@ -504,7 +605,12 @@ export class BotRuntime {
         return;
       }
 
-      await session.sendText(scheduleCommandHelp("/schedule"), options);
+      await sendRichOrText(
+        session,
+        buildTelegramScheduleHelpMarkdown("/schedule"),
+        scheduleCommandHelp("/schedule"),
+        options
+      );
     } catch (error) {
       await session.sendText(toErrorMessage(error), options);
     }
@@ -720,8 +826,8 @@ export class BotRuntime {
       return;
     }
 
-    const text = message.text;
-    if (typeof text === "string" && text.trim()) {
+    const text = messageText(message);
+    if (text.trim()) {
       const parsedCommand = parseCommand(text, this.botUsername);
       if (parsedCommand?.ignored) {
         await session.sendText(COMMAND_REJECTION_OTHER_BOT, { replyTarget });

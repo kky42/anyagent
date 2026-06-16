@@ -16,6 +16,15 @@ import { escapeTelegramMarkdown } from "./render.js";
 import { TelegramApiError } from "./telegram-api.js";
 
 const TELEGRAM_RENDER_CHUNK_SIZE = 3500;
+const TELEGRAM_RICH_RENDER_CHUNK_SIZE = 32000;
+const TELEGRAM_MAX_DRAFT_ID = 2_147_483_647;
+
+function escapeHtmlText(text) {
+  return String(text ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
 
 function isParseError(error) {
   return (
@@ -23,6 +32,17 @@ function isParseError(error) {
     error.errorCode === 400 &&
     /parse entities/i.test(error.message)
   );
+}
+
+function isUnsupportedRichMessageError(error) {
+  return (
+    error instanceof TelegramApiError &&
+    (error.errorCode === 404 || /not found|unsupported|unknown method/i.test(error.message))
+  );
+}
+
+function isRecoverableRichMessageError(error) {
+  return error instanceof TelegramApiError && (error.errorCode === 400 || isUnsupportedRichMessageError(error));
 }
 
 function getTelegramMessageId(result) {
@@ -99,6 +119,14 @@ function hasVisibleText(text) {
   return Boolean(String(text ?? "").trim());
 }
 
+function richMarkdownCandidate(rawText) {
+  const text = String(rawText ?? "");
+  if (!text.trim() || text.length > TELEGRAM_RICH_RENDER_CHUNK_SIZE) {
+    return null;
+  }
+  return text;
+}
+
 function buildRenderAttempts(rawChunk) {
   return [
     { text: rawChunk, parseMode: "HTML" },
@@ -129,11 +157,15 @@ export class MessageRenderer {
     this.progressMessageId = null;
     this.lastRenderedProgressText = null;
     this.typingTimer = null;
+    this.richMessagesUnavailable = false;
+    this.richDraftsUnavailable = false;
+    this.richDraftId = null;
   }
 
   resetTransientState() {
     this.progressMessageId = null;
     this.lastRenderedProgressText = null;
+    this.richDraftId = null;
   }
 
   async clearProgressMessage() {
@@ -170,6 +202,104 @@ export class MessageRenderer {
     }
 
     throw previousParseError ?? new Error("Telegram render fallback exhausted unexpectedly.");
+  }
+
+  async trySendRichMarkdown(rawText, options = {}) {
+    if (this.richMessagesUnavailable || typeof this.botApi.sendRichMessage !== "function") {
+      return null;
+    }
+
+    const markdown = richMarkdownCandidate(rawText);
+    if (markdown === null) {
+      return null;
+    }
+
+    try {
+      return await this.botApi.sendRichMessage({
+        chatId: this.chatId,
+        richMessage: { markdown },
+        ...outboundMessageTarget(options.replyTarget)
+      });
+    } catch (error) {
+      if (!isRecoverableRichMessageError(error)) {
+        throw error;
+      }
+      if (isUnsupportedRichMessageError(error)) {
+        this.richMessagesUnavailable = true;
+      } else {
+        this.logger(`rich message fallback: ${toErrorMessage(error)}`);
+      }
+      return null;
+    }
+  }
+
+  async sendRichText(markdown, options = {}) {
+    const rawMarkdown = String(markdown ?? "");
+    if (!rawMarkdown) {
+      return;
+    }
+
+    const result = await this.trySendRichMarkdown(rawMarkdown, options);
+    if (result) {
+      return result;
+    }
+
+    return this.sendText(options.fallbackText ?? rawMarkdown, {
+      ...options,
+      allowRich: false
+    });
+  }
+
+  nextRichDraftId() {
+    if (!this.richDraftId) {
+      this.richDraftId = Math.floor(Date.now() % TELEGRAM_MAX_DRAFT_ID) || 1;
+    }
+    return this.richDraftId;
+  }
+
+  draftMessageThreadId(replyTarget) {
+    if (replyTarget?.messageThreadId !== null && replyTarget?.messageThreadId !== undefined) {
+      return replyTarget.messageThreadId;
+    }
+    if (replyTarget?.directMessagesTopicId !== null && replyTarget?.directMessagesTopicId !== undefined) {
+      return replyTarget.directMessagesTopicId;
+    }
+    return null;
+  }
+
+  canSendRichDraft() {
+    return (
+      !this.richDraftsUnavailable &&
+      Number(this.chatId) > 0 &&
+      typeof this.botApi.sendRichMessageDraft === "function"
+    );
+  }
+
+  async tryRenderProgressDraft(displayText, options = {}) {
+    if (!this.canSendRichDraft()) {
+      return false;
+    }
+
+    try {
+      await this.botApi.sendRichMessageDraft({
+        chatId: this.chatId,
+        draftId: this.nextRichDraftId(),
+        richMessage: {
+          html: `<tg-thinking>${escapeHtmlText(displayText)}</tg-thinking>`
+        },
+        messageThreadId: this.draftMessageThreadId(options.replyTarget)
+      });
+      return true;
+    } catch (error) {
+      if (!isRecoverableRichMessageError(error)) {
+        throw error;
+      }
+      this.richDraftsUnavailable = true;
+      if (!isUnsupportedRichMessageError(error)) {
+        this.logger(`rich draft fallback: ${toErrorMessage(error)}`);
+      }
+      return false;
+    }
   }
 
   async sendMessageChunk(rawChunk, options = {}) {
@@ -226,6 +356,11 @@ export class MessageRenderer {
       return;
     }
 
+    if (await this.tryRenderProgressDraft(displayText, options)) {
+      this.lastRenderedProgressText = displayText;
+      return;
+    }
+
     if (this.progressMessageId) {
       await this.editMessageChunk(this.progressMessageId, displayText);
     } else {
@@ -235,8 +370,28 @@ export class MessageRenderer {
     this.lastRenderedProgressText = displayText;
   }
 
+  async tryRenderRichTerminalText(rawText, options = {}) {
+    if (!options.richMarkdown) {
+      return false;
+    }
+
+    const result = await this.trySendRichMarkdown(rawText, options);
+    if (!result) {
+      return false;
+    }
+
+    if (this.progressMessageId) {
+      await this.clearProgressMessage();
+    }
+    return true;
+  }
+
   async renderTerminalText(rawText, options = {}) {
     if (!rawText) {
+      return;
+    }
+
+    if (await this.tryRenderRichTerminalText(rawText, options)) {
       return;
     }
 
@@ -411,6 +566,7 @@ export class MessageRenderer {
       deliverText: (rawText) =>
         this.renderTerminalText(rawText, {
           ...options,
+          richMarkdown: true,
           renderMarkdown: true
         })
     });
@@ -425,6 +581,7 @@ export class MessageRenderer {
       deliverText: (rawText) =>
         this.renderTerminalText(rawText, {
           ...options,
+          richMarkdown: true,
           renderMarkdown: true
         })
     });
@@ -440,7 +597,14 @@ export class MessageRenderer {
       return;
     }
 
-    await this.sendSplitText(rawText, options);
+    if (options.allowRich !== false) {
+      const result = await this.trySendRichMarkdown(rawText, options);
+      if (result) {
+        return result;
+      }
+    }
+
+    return this.sendSplitText(rawText, options);
   }
 
   startTyping(replyTarget = null) {

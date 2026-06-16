@@ -201,6 +201,69 @@ export class TelegramBotApi {
     return this.callWithThreadFallback("sendMessage", payload, options);
   }
 
+  sendRichMessage({
+    chatId,
+    richMessage = null,
+    markdown = null,
+    html = null,
+    isRtl = null,
+    skipEntityDetection = null,
+    messageThreadId = null,
+    directMessagesTopicId = null
+  }, options = {}) {
+    const payload = {
+      chat_id: chatId,
+      rich_message: richMessage ?? {}
+    };
+
+    if (markdown !== null && markdown !== undefined) {
+      payload.rich_message.markdown = markdown;
+    }
+    if (html !== null && html !== undefined) {
+      payload.rich_message.html = html;
+    }
+    if (isRtl !== null && isRtl !== undefined) {
+      payload.rich_message.is_rtl = Boolean(isRtl);
+    }
+    if (skipEntityDetection !== null && skipEntityDetection !== undefined) {
+      payload.rich_message.skip_entity_detection = Boolean(skipEntityDetection);
+    }
+    if (messageThreadId !== null && messageThreadId !== undefined) {
+      payload.message_thread_id = messageThreadId;
+    } else if (directMessagesTopicId !== null && directMessagesTopicId !== undefined) {
+      payload.direct_messages_topic_id = directMessagesTopicId;
+    }
+
+    return this.callWithThreadFallback("sendRichMessage", payload, options);
+  }
+
+  sendRichMessageDraft({
+    chatId,
+    draftId,
+    richMessage = null,
+    markdown = null,
+    html = null,
+    messageThreadId = null
+  }, options = {}) {
+    const payload = {
+      chat_id: chatId,
+      draft_id: draftId,
+      rich_message: richMessage ?? {}
+    };
+
+    if (markdown !== null && markdown !== undefined) {
+      payload.rich_message.markdown = markdown;
+    }
+    if (html !== null && html !== undefined) {
+      payload.rich_message.html = html;
+    }
+    if (messageThreadId !== null && messageThreadId !== undefined) {
+      payload.message_thread_id = messageThreadId;
+    }
+
+    return this.call("sendRichMessageDraft", payload, options);
+  }
+
   editMessageText({ chatId, messageId, text, parseMode = null }, options = {}) {
     const payload = {
       chat_id: chatId,

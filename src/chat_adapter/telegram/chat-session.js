@@ -6,10 +6,13 @@ import {
   attachmentLimitText,
   buildAttachmentFileName
 } from "../common/attachments.js";
+import { formatAuto } from "../../auto-mode.js";
 import { ChatSession as CommonChatSession } from "../common/chat-session.js";
 import { ensureCacheScope } from "../common/cache-scope.js";
 import { appendReferenceContext } from "../common/reference-context.js";
-import { DEFAULT_CACHE_PATH, toErrorMessage } from "../../utils.js";
+import { DEFAULT_CACHE_PATH, formatLocalTimestamp, formatTokenCountK, toErrorMessage } from "../../utils.js";
+import { summarizeQueue } from "../common/render.js";
+import { describeNextSchedule } from "../common/schedules.js";
 import {
   attachmentDescriptorFromMessage,
   unsupportedAttachmentMessage
@@ -18,6 +21,64 @@ import { MessageRenderer } from "./message-renderer.js";
 
 function normalizeCaption(value) {
   return String(value ?? "").trim();
+}
+
+function inlineValue(value) {
+  return String(value ?? "").replace(/\s*\r?\n\s*/g, " ").trim();
+}
+
+function markdownKeyValues(rows) {
+  return rows.map(([key, value]) => `- **${key}:** ${inlineValue(value)}`).join("\n");
+}
+
+function nextScheduleSummary(schedules) {
+  const enabledSchedules = schedules.filter((schedule) => schedule.enabled !== false);
+  if (enabledSchedules.length === 0) {
+    return "n/a";
+  }
+
+  const nextSchedule = enabledSchedules
+    .map((schedule) => {
+      try {
+        return {
+          ...schedule,
+          next: describeNextSchedule(schedule)
+        };
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.next.getTime() - right.next.getTime())[0];
+
+  return nextSchedule
+    ? `${nextSchedule.mode} ${nextSchedule.name} at ${formatLocalTimestamp(
+        Math.floor(nextSchedule.next.getTime() / 1000)
+      )}`
+    : "n/a";
+}
+
+function renderTelegramStatusMarkdown(session) {
+  const enabledSchedules = session.schedules.filter((schedule) => schedule.enabled !== false);
+  const disabledSchedules = session.schedules.filter((schedule) => schedule.enabled === false);
+  return [
+    "# AnyAgent Status",
+    "",
+    markdownKeyValues([
+      ["running", session.isRunning ? "yes" : "no"],
+      ["cli", session.cli],
+      ["workdir", session.workdir],
+      ["auto", formatAuto(session.auto)],
+      ["model", session.model],
+      ["reasoning_effort", session.reasoningEffort],
+      ["context_length", formatTokenCountK(session.contextLength)],
+      ["schedules", `${enabledSchedules.length} enabled, ${disabledSchedules.length} disabled`],
+      ["next_schedule", nextScheduleSummary(session.schedules)]
+    ]),
+    "",
+    "## Queue",
+    summarizeQueue(session.queue)
+  ].join("\n");
 }
 
 export function replyTargetFromTelegramMessage(message) {
@@ -98,6 +159,17 @@ export class ChatSession extends CommonChatSession {
 
   stopTyping() {
     return this.messageRenderer.stopTyping();
+  }
+
+  sendRichText(markdown, options = {}) {
+    return this.messageRenderer.sendRichText(markdown, options);
+  }
+
+  async handleStatus(options = {}) {
+    await this.sendRichText(renderTelegramStatusMarkdown(this), {
+      ...options,
+      fallbackText: super.statusText()
+    });
   }
 
   async resolveAttachmentLocalPath(descriptor, filePath) {

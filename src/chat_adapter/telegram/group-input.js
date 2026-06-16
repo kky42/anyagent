@@ -1,5 +1,6 @@
 import { formatInputAttachment } from "../../cli_adapter/turn-input.js";
 import { formatLocalTimestamp, normalizeTelegramUsername } from "../../utils.js";
+import { telegramMessageText } from "./rich-message.js";
 
 function parseFiniteNumber(value) {
   const normalized = Number(value);
@@ -11,13 +12,7 @@ function messageTimestamp(message) {
 }
 
 function messageText(message) {
-  if (typeof message?.text === "string") {
-    return message.text;
-  }
-  if (typeof message?.caption === "string") {
-    return message.caption;
-  }
-  return "";
+  return telegramMessageText(message);
 }
 
 function userDisplayName(user) {

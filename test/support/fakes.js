@@ -10,6 +10,10 @@ export class FakeBotApi {
     failMarkdownOnce = false,
     failHtmlEditOnce = false,
     failMarkdownEditOnce = false,
+    supportsRichMessages = false,
+    supportsRichDrafts = false,
+    failRichMessageOnce = false,
+    failRichDraftOnce = false,
     attachmentFailures = null,
     getUpdatesResult = []
   } = {}) {
@@ -17,7 +21,13 @@ export class FakeBotApi {
     this.failMarkdownOnce = failMarkdownOnce;
     this.failHtmlEditOnce = failHtmlEditOnce;
     this.failMarkdownEditOnce = failMarkdownEditOnce;
+    this.supportsRichMessages = supportsRichMessages;
+    this.supportsRichDrafts = supportsRichDrafts;
+    this.failRichMessageOnce = failRichMessageOnce;
+    this.failRichDraftOnce = failRichDraftOnce;
     this.messages = [];
+    this.richMessages = [];
+    this.richDrafts = [];
     this.edits = [];
     this.attachments = [];
     this.actions = [];
@@ -64,6 +74,37 @@ export class FakeBotApi {
     }
     this.edits.push(normalizedPayload);
     return { message_id: payload.messageId };
+  }
+
+  async sendRichMessage(payload) {
+    if (!this.supportsRichMessages) {
+      throw new TelegramApiError("Not Found", { errorCode: 404 });
+    }
+    if (this.failRichMessageOnce) {
+      this.failRichMessageOnce = false;
+      throw new TelegramApiError("can't parse rich message", { errorCode: 400 });
+    }
+
+    const richMessage = payload.richMessage ?? {};
+    const normalizedPayload = {
+      ...payload,
+      text: richMessage.markdown ?? richMessage.html ?? ""
+    };
+    this.richMessages.push(normalizedPayload);
+    this.messages.push(normalizedPayload);
+    return { message_id: this.nextMessageId++ };
+  }
+
+  async sendRichMessageDraft(payload) {
+    if (!this.supportsRichDrafts) {
+      throw new TelegramApiError("Not Found", { errorCode: 404 });
+    }
+    if (this.failRichDraftOnce) {
+      this.failRichDraftOnce = false;
+      throw new TelegramApiError("can't parse rich draft", { errorCode: 400 });
+    }
+    this.richDrafts.push(payload);
+    return true;
   }
 
   async deleteMessage(payload) {
