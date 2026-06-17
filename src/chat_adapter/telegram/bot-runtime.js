@@ -149,6 +149,13 @@ function isIgnoredServiceMessage(message) {
   return IGNORED_SERVICE_MESSAGE_FIELDS.some((field) => message?.[field]);
 }
 
+// Telegram auto-sends a `/start` message when a user first opens a private chat
+// with the bot (clicks the "Start" button). It is a Telegram-only convention and
+// is not one of our commands, so ignore it silently instead of replying "Unknown command.".
+function isTelegramStartCommand(message) {
+  return messageText(message).trim().toLowerCase() === "/start";
+}
+
 function messageText(message) {
   return telegramMessageText(message);
 }
@@ -811,6 +818,10 @@ export class BotRuntime {
     }
 
     if (isIgnoredServiceMessage(message)) {
+      return;
+    }
+
+    if (isTelegramStartCommand(message)) {
       return;
     }
 
