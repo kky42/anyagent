@@ -83,6 +83,27 @@ test("runtime routes inbound Telegram rich_message content to the agent as Markd
   await runtime.stop();
 });
 
+test("runtime recognizes inbound Telegram rich_message bot commands", async () => {
+  assert.equal(
+    richMessageToMarkdown({
+      blocks: [{ type: "paragraph", text: { type: "bot_command", value: "status" } }]
+    }),
+    "/status"
+  );
+
+  const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
+
+  await runtime.handleMessage(
+    buildRichMessage({
+      blocks: [{ type: "paragraph", text: { type: "bot_command", text: "status" } }]
+    })
+  );
+
+  assert.equal(runnerFactory.runs.length, 0);
+  assert.match(fakeBotApi.messages.at(-1).text, /running: no/);
+  await runtime.stop();
+});
+
 test("Telegram status command sends rich key-value output when rich messages are available", async () => {
   const { runtime, fakeBotApi } = await createRuntime();
   fakeBotApi.supportsRichMessages = true;

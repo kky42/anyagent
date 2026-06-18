@@ -90,8 +90,11 @@ export function richTextToMarkdown(value) {
     case "mention":
     case "hashtag":
     case "cashtag":
-    case "bot_command":
       return text || String(value.value ?? value.name ?? "");
+    case "bot_command": {
+      const command = text || String(value.value ?? value.name ?? "");
+      return command && !command.startsWith("/") ? `/${command}` : command;
+    }
     default:
       return text || String(value.expression ?? value.alternative_text ?? value.url ?? value.name ?? "");
   }
