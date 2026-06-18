@@ -9,6 +9,20 @@ import { flush } from "./support/async.js";
 import { TelegramApiError } from "../src/chat_adapter/telegram/telegram-api.js";
 import { FakeBotApi } from "./support/fakes.js";
 
+async function withRichDraftsEnabled(fn) {
+  const previous = process.env.ANYAGENT_TELEGRAM_RICH_DRAFTS;
+  process.env.ANYAGENT_TELEGRAM_RICH_DRAFTS = "1";
+  try {
+    return await fn();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.ANYAGENT_TELEGRAM_RICH_DRAFTS;
+    } else {
+      process.env.ANYAGENT_TELEGRAM_RICH_DRAFTS = previous;
+    }
+  }
+}
+
 test("sendText falls back to MarkdownV2 when Telegram HTML parsing fails", async () => {
   const fakeBotApi = new FakeBotApi({ failHtmlOnce: true });
   const { session } = await createSession({ fakeBotApi });
@@ -87,7 +101,7 @@ test("rich final agent_message deletes the transient progress message instead of
   assert.deepEqual(fakeBotApi.edits, []);
 });
 
-test("private progress uses Telegram rich message drafts when available", async () => {
+test("private progress uses visible messages by default even when Telegram rich drafts are available", async () => {
   const fakeBotApi = new FakeBotApi({ supportsRichDrafts: true });
   const { session, runnerFactory } = await createSession({ fakeBotApi });
 
@@ -103,10 +117,14 @@ test("private progress uses Telegram rich message drafts when available", async 
     }
   });
 
-  assert.equal(fakeBotApi.richDrafts.length, 1);
-  assert.equal(fakeBotApi.richDrafts[0].chatId, 1001);
-  assert.match(fakeBotApi.richDrafts[0].richMessage.html, /<tg-thinking>🟢 reasoning<\/tg-thinking>/);
-  assert.deepEqual(fakeBotApi.messages, []);
+  assert.deepEqual(fakeBotApi.richDrafts, []);
+  assert.deepEqual(fakeBotApi.messages, [
+    {
+      chatId: 1001,
+      text: "🟢 reasoning",
+      parseMode: "HTML"
+    }
+  ]);
 
   run.finish();
   await flush();
@@ -131,7 +149,7 @@ test("direct-message topic progress skips unsupported Telegram rich drafts", asy
   ]);
 });
 
-test("private rich draft progress refreshes while the run is still active", async () => {
+test("private rich draft progress refreshes while the run is still active when explicitly enabled", async () => withRichDraftsEnabled(async () => {
   const fakeBotApi = new FakeBotApi({ supportsRichDrafts: true });
   const { session } = await createSession({ fakeBotApi });
 
@@ -141,9 +159,9 @@ test("private rich draft progress refreshes while the run is still active", asyn
   assert.equal(fakeBotApi.richDrafts.length, 2);
   assert.equal(fakeBotApi.richDrafts[0].draftId, fakeBotApi.richDrafts[1].draftId);
   assert.deepEqual(fakeBotApi.messages, []);
-});
+}));
 
-test("private rich draft progress falls back to a message if refresh fails", async () => {
+test("private rich draft progress falls back to a message if refresh fails when explicitly enabled", async () => withRichDraftsEnabled(async () => {
   const fakeBotApi = new FakeBotApi({ supportsRichDrafts: true });
   const { session } = await createSession({ fakeBotApi });
 
@@ -159,9 +177,9 @@ test("private rich draft progress falls back to a message if refresh fails", asy
       parseMode: "HTML"
     }
   ]);
-});
+}));
 
-test("rich draft progress is not materialized after a final agent_message", async () => {
+test("rich draft progress is not materialized after a final agent_message when explicitly enabled", async () => withRichDraftsEnabled(async () => {
   const fakeBotApi = new FakeBotApi({ supportsRichDrafts: true });
   const { session, runnerFactory } = await createSession({ fakeBotApi });
 
@@ -200,9 +218,9 @@ test("rich draft progress is not materialized after a final agent_message", asyn
       parseMode: "HTML"
     }
   ]);
-});
+}));
 
-test("rich draft progress after a final agent_message is not materialized on completion", async () => {
+test("rich draft progress after a final agent_message is not materialized on completion when explicitly enabled", async () => withRichDraftsEnabled(async () => {
   const fakeBotApi = new FakeBotApi({ supportsRichDrafts: true });
   const { session, runnerFactory } = await createSession({ fakeBotApi });
 
@@ -249,7 +267,7 @@ test("rich draft progress after a final agent_message is not materialized on com
       parseMode: "HTML"
     }
   ]);
-});
+}));
 
 test("progress items reuse one Telegram message and final agent_message replaces it", async () => {
   const { session, fakeBotApi, runnerFactory } = await createSession();

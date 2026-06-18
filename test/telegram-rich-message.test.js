@@ -103,9 +103,14 @@ test("runtime recognizes inbound Telegram rich_message bot commands", async () =
   const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
 
   await runtime.handleMessage(
-    buildRichMessage({
-      blocks: [{ type: "paragraph", text: { type: "bot_command", text: "status" } }]
-    })
+    buildRichMessage(
+      {
+        blocks: [{ type: "paragraph", text: { type: "bot_command", text: "status" } }]
+      },
+      "AllowedUser",
+      1001,
+      { text: "status" }
+    )
   );
 
   assert.equal(runnerFactory.runs.length, 0);

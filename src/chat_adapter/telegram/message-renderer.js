@@ -18,6 +18,7 @@ import { TelegramApiError } from "./telegram-api.js";
 const TELEGRAM_RENDER_CHUNK_SIZE = 3500;
 const TELEGRAM_RICH_RENDER_CHUNK_SIZE = 32000;
 const TELEGRAM_MAX_DRAFT_ID = 2_147_483_647;
+const ENABLE_RICH_DRAFTS_ENV = "ANYAGENT_TELEGRAM_RICH_DRAFTS";
 
 function escapeHtmlText(text) {
   return String(text ?? "")
@@ -299,6 +300,7 @@ export class MessageRenderer {
 
   canSendRichDraft() {
     return (
+      process.env[ENABLE_RICH_DRAFTS_ENV] === "1" &&
       !this.richDraftsUnavailable &&
       Number(this.chatId) > 0 &&
       typeof this.botApi.sendRichMessageDraft === "function"

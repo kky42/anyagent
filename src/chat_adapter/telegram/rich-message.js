@@ -269,11 +269,15 @@ export function richMessageToMarkdown(richMessage) {
 }
 
 export function telegramMessageText(message) {
+  const richMarkdown = richMessageToMarkdown(message?.rich_message ?? message?.richMessage);
+  if (String(richMarkdown ?? "").trim()) {
+    return richMarkdown;
+  }
   if (typeof message?.text === "string") {
     return message.text;
   }
   if (typeof message?.caption === "string") {
     return message.caption;
   }
-  return richMessageToMarkdown(message?.rich_message ?? message?.richMessage);
+  return "";
 }
