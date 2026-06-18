@@ -142,11 +142,16 @@ function outboundMessageTarget(replyTarget) {
   const target = {};
   if (replyTarget.directMessagesTopicId !== null && replyTarget.directMessagesTopicId !== undefined) {
     target.directMessagesTopicId = replyTarget.directMessagesTopicId;
+    return target;
   }
   if (replyTarget.messageThreadId !== null && replyTarget.messageThreadId !== undefined) {
     target.messageThreadId = replyTarget.messageThreadId;
   }
   return target;
+}
+
+function isDirectMessagesTopicTarget(replyTarget) {
+  return replyTarget?.directMessagesTopicId !== null && replyTarget?.directMessagesTopicId !== undefined;
 }
 
 export class MessageRenderer {
@@ -289,9 +294,6 @@ export class MessageRenderer {
     if (replyTarget?.messageThreadId !== null && replyTarget?.messageThreadId !== undefined) {
       return replyTarget.messageThreadId;
     }
-    if (replyTarget?.directMessagesTopicId !== null && replyTarget?.directMessagesTopicId !== undefined) {
-      return replyTarget.directMessagesTopicId;
-    }
     return null;
   }
 
@@ -304,7 +306,7 @@ export class MessageRenderer {
   }
 
   async tryRenderProgressDraft(displayText, options = {}) {
-    if (!this.canSendRichDraft()) {
+    if (!this.canSendRichDraft() || isDirectMessagesTopicTarget(options.replyTarget)) {
       return false;
     }
 
@@ -391,7 +393,12 @@ export class MessageRenderer {
     }
 
     if (this.progressMessageId) {
-      await this.editMessageChunk(this.progressMessageId, displayText);
+      try {
+        await this.editMessageChunk(this.progressMessageId, displayText);
+      } catch (error) {
+        this.logger(`progress edit failed; sending a replacement: ${toErrorMessage(error)}`);
+        this.progressMessageId = await this.sendSplitText(displayText, options);
+      }
     } else {
       this.progressMessageId = await this.sendSplitText(displayText, options);
     }
@@ -432,7 +439,12 @@ export class MessageRenderer {
 
     if (this.progressMessageId) {
       if (firstChunk !== this.lastRenderedProgressText) {
-        await this.editMessageChunk(this.progressMessageId, firstChunk, options);
+        try {
+          await this.editMessageChunk(this.progressMessageId, firstChunk, options);
+        } catch (error) {
+          this.logger(`final edit failed; sending a replacement: ${toErrorMessage(error)}`);
+          await this.sendMessageChunk(firstChunk, options);
+        }
       }
       this.markProgressSuperseded();
 
@@ -645,14 +657,16 @@ export class MessageRenderer {
     }
 
     const tick = async () => {
-      try {
-        await this.botApi.sendChatAction({
-          chatId: this.chatId,
-          action: "typing",
-          ...outboundMessageTarget(replyTarget)
-        });
-      } catch (error) {
-        this.logger(`typing indicator failed: ${toErrorMessage(error)}`);
+      if (!isDirectMessagesTopicTarget(replyTarget)) {
+        try {
+          await this.botApi.sendChatAction({
+            chatId: this.chatId,
+            action: "typing",
+            ...outboundMessageTarget(replyTarget)
+          });
+        } catch (error) {
+          this.logger(`typing indicator failed: ${toErrorMessage(error)}`);
+        }
       }
 
       try {

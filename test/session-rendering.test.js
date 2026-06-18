@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 
 import { createSession } from "./support/builders.js";
 import { flush } from "./support/async.js";
+import { TelegramApiError } from "../src/chat_adapter/telegram/telegram-api.js";
 import { FakeBotApi } from "./support/fakes.js";
 
 test("sendText falls back to MarkdownV2 when Telegram HTML parsing fails", async () => {
@@ -109,6 +110,25 @@ test("private progress uses Telegram rich message drafts when available", async 
 
   run.finish();
   await flush();
+});
+
+test("direct-message topic progress skips unsupported Telegram rich drafts", async () => {
+  const fakeBotApi = new FakeBotApi({ supportsRichDrafts: true });
+  const { session } = await createSession({ fakeBotApi });
+
+  await session.renderProgressText("reasoning", {
+    replyTarget: { directMessagesTopicId: 22, messageThreadId: 33 }
+  });
+
+  assert.deepEqual(fakeBotApi.richDrafts, []);
+  assert.deepEqual(fakeBotApi.messages, [
+    {
+      chatId: 1001,
+      text: "🟢 reasoning",
+      parseMode: "HTML",
+      directMessagesTopicId: 22
+    }
+  ]);
 });
 
 test("private rich draft progress refreshes while the run is still active", async () => {
@@ -482,6 +502,51 @@ test("long final agent_message edits the progress message and sends remaining ch
       parseMode: "HTML"
     }
   ]);
+});
+
+test("final agent_message falls back to a new message when progress edit fails", async () => {
+  const { session, fakeBotApi, runnerFactory } = await createSession();
+  fakeBotApi.editMessageText = async () => {
+    throw new TelegramApiError("Bad Request: message to edit not found", { errorCode: 400 });
+  };
+
+  await session.enqueueMessage("first");
+  const run = runnerFactory.runs[0];
+
+  await run.emit({
+    type: "item.started",
+    item: {
+      id: "item_1",
+      type: "reasoning",
+      status: "in_progress"
+    }
+  });
+  await run.emit({
+    type: "item.completed",
+    item: {
+      id: "item_2",
+      type: "agent_message",
+      text: "done"
+    }
+  });
+  run.finish();
+
+  await flush();
+  await flush();
+
+  assert.deepEqual(fakeBotApi.messages, [
+    {
+      chatId: 1001,
+      text: "🟢 reasoning",
+      parseMode: "HTML"
+    },
+    {
+      chatId: 1001,
+      text: "done",
+      parseMode: "HTML"
+    }
+  ]);
+  assert.deepEqual(fakeBotApi.edits, []);
 });
 
 test("turn errors replace the in-flight progress message", async () => {

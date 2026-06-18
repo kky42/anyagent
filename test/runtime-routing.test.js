@@ -142,6 +142,26 @@ test("runtime rejects unsupported non-text messages", async () => {
   );
 });
 
+test("runtime routes private attachment captions that are commands", async () => {
+  const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
+  fakeBotApi.registerFile("photo-status", {
+    filePath: "photos/status.jpg",
+    body: Buffer.from("status")
+  });
+
+  await runtime.handleMessage({
+    message_id: 101,
+    chat: { id: 1001, type: "private" },
+    from: { id: 42, username: "AllowedUser" },
+    caption: "/status",
+    photo: [{ file_id: "photo-status", file_unique_id: "photo-status", file_size: 6, width: 100, height: 100 }]
+  });
+
+  assert.equal(runnerFactory.runs.length, 0);
+  assert.deepEqual(fakeBotApi.getFileCalls, []);
+  assert.match(fakeBotApi.messages.at(-1).text, /running: no/);
+});
+
 test("runtime ignores Telegram topic-created service messages", async () => {
   const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
 
@@ -329,7 +349,6 @@ test("runtime shares one private chat session across Telegram threads but replie
       chatId: 1001,
       text: "Queued message 1.",
       parseMode: "HTML",
-      directMessagesTopicId: 22,
       messageThreadId: 22
     }
   ]);
@@ -370,14 +389,12 @@ test("runtime shares one private chat session across Telegram threads but replie
         chatId: 1001,
         text: "answer one",
         parseMode: "HTML",
-        directMessagesTopicId: 11,
         messageThreadId: 11
       },
       {
         chatId: 1001,
         text: "answer two",
         parseMode: "HTML",
-        directMessagesTopicId: 22,
         messageThreadId: 22
       }
     ]
@@ -399,7 +416,6 @@ test("runtime routes first private topic message without quoting it", async () =
     {
       chatId: 1001,
       action: "typing",
-      directMessagesTopicId: 11,
       messageThreadId: 11
     }
   ]);
@@ -419,7 +435,6 @@ test("runtime routes first private topic message without quoting it", async () =
     chatId: 1001,
     text: "topic answer",
     parseMode: "HTML",
-    directMessagesTopicId: 11,
     messageThreadId: 11
   });
 });
@@ -783,6 +798,27 @@ test("runtime rejects relay commands from unauthorized Telegram group users", as
   assert.equal(fakeBotApi.messages.at(-1).text, "Only manager users can run AnyAgent commands.");
 });
 
+test("runtime authorizes private topic messages before group-like routing", async () => {
+  const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
+
+  await runtime.handleMessage(
+    buildTextMessage("hi", "OtherUser", 12345, {
+      message_id: 1,
+      date: 1700000001,
+      from: { id: 99, username: "OtherUser" },
+      chat: { id: 12345, type: "private", title: "Example Topic" },
+      message_thread_id: 777
+    })
+  );
+
+  assert.equal(runnerFactory.runs.length, 0);
+  assert.equal(runtime.sessions.has("12345:topic:777"), false);
+  assert.equal(
+    fakeBotApi.messages.at(-1).text,
+    'You are not authorized to use this bot. Your Telegram username is @otheruser. Add "otheruser" to allowedUsernames in this Telegram binding.'
+  );
+});
+
 test("runtime treats private topic messages as group-like conversations", async () => {
   const { runtime, runnerFactory, fakeBotApi } = await createRuntime();
 
@@ -842,14 +878,7 @@ test("runtime routes existing private topic messages with Telegram message_threa
   );
 
   assert.equal(runnerFactory.runs.length, 1);
-  assert.deepEqual(fakeBotApi.actions, [
-    {
-      chatId: 1001,
-      action: "typing",
-      messageThreadId: 33,
-      directMessagesTopicId: 22
-    }
-  ]);
+  assert.deepEqual(fakeBotApi.actions, []);
 
   await runnerFactory.runs[0].emit({
     type: "item.started",
@@ -875,8 +904,7 @@ test("runtime routes existing private topic messages with Telegram message_threa
     chatId: 1001,
     text: "🟢 reasoning",
     parseMode: "HTML",
-    directMessagesTopicId: 22,
-    messageThreadId: 33
+    directMessagesTopicId: 22
   });
   assert.deepEqual(fakeBotApi.edits.at(-1), {
     chatId: 1001,

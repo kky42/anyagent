@@ -86,9 +86,18 @@ test("runtime routes inbound Telegram rich_message content to the agent as Markd
 test("runtime recognizes inbound Telegram rich_message bot commands", async () => {
   assert.equal(
     richMessageToMarkdown({
-      blocks: [{ type: "paragraph", text: { type: "bot_command", value: "status" } }]
+      blocks: [
+        {
+          type: "paragraph",
+          text: [
+            { type: "mention", username: "relaybot" },
+            " ",
+            { type: "bot_command", bot_command: "status" }
+          ]
+        }
+      ]
     }),
-    "/status"
+    "@relaybot /status"
   );
 
   const { runtime, fakeBotApi, runnerFactory } = await createRuntime();

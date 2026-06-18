@@ -160,6 +160,15 @@ function messageText(message) {
   return telegramMessageText(message);
 }
 
+function privateConversationId(message) {
+  const chatId = message?.chat?.id;
+  const directTopicId = message?.direct_messages_topic?.topic_id;
+  if (chatId !== null && chatId !== undefined && directTopicId !== null && directTopicId !== undefined) {
+    return `${chatId}:direct:${directTopicId}`;
+  }
+  return chatId;
+}
+
 function groupLikeConversationId(message) {
   const chatType = message?.chat?.type;
   if (chatType === "group" || chatType === "supergroup") {
@@ -798,22 +807,28 @@ export class BotRuntime {
       return;
     }
 
-    const groupConversationId = groupLikeConversationId(message);
-    if (groupConversationId !== null) {
-      await this.handleGroupMessage(message, { conversationId: groupConversationId });
+    if (message.chat?.type === "private") {
+      await this.handlePrivateMessage(message);
       return;
     }
 
-    if (message.chat?.type === "private") {
-      await this.handlePrivateMessage(message);
+    const groupConversationId = groupLikeConversationId(message);
+    if (groupConversationId !== null) {
+      await this.handleGroupMessage(message, { conversationId: groupConversationId });
       return;
     }
   }
 
   async handlePrivateMessage(message) {
     const chatId = message.chat?.id;
+    const replyTarget = replyTargetFromTelegramMessage(message);
+
     if (!this.isAuthorized(message.from)) {
-      await this.sendDirectMessage(chatId, unauthorizedMessage(message.from));
+      const session = this.sessionFor(chatId, {
+        conversationId: privateConversationId(message),
+        deliveryAnchor: deliveryAnchorFromTelegramMessage(message)
+      });
+      await session.sendText(unauthorizedMessage(message.from), { replyTarget });
       return;
     }
 
@@ -825,18 +840,16 @@ export class BotRuntime {
       return;
     }
 
-    const replyTarget = replyTargetFromTelegramMessage(message);
-    const session = this.sessionFor(chatId, {
-      deliveryAnchor: deliveryAnchorFromTelegramMessage(message)
-    });
-    if (hasSupportedAttachment(message)) {
-      const referenceText = await this.buildPrivateReferenceText(session, message);
-      await this.mediaGroupBuffer.queue(session, message, (messages) =>
-        session.handleAttachmentMessages(messages, { referenceText })
-      );
+    const groupConversationId = groupLikeConversationId(message);
+    if (groupConversationId !== null) {
+      await this.handleGroupMessage(message, { conversationId: groupConversationId });
       return;
     }
 
+    const session = this.sessionFor(chatId, {
+      conversationId: privateConversationId(message),
+      deliveryAnchor: deliveryAnchorFromTelegramMessage(message)
+    });
     const text = messageText(message);
     if (text.trim()) {
       const parsedCommand = parseCommand(text, this.botUsername);
@@ -863,7 +876,19 @@ export class BotRuntime {
         }
         return;
       }
+    }
 
+    const supportedAttachment = hasSupportedAttachment(message);
+    if (supportedAttachment) {
+      await this.mediaGroupBuffer.queue(session, message, async (messages) => {
+        const primaryMessage = messages.find((candidate) => messageText(candidate).trim()) ?? messages[0];
+        const referenceText = await this.buildPrivateReferenceText(session, primaryMessage);
+        await session.handleAttachmentMessages(messages, { referenceText });
+      });
+      return;
+    }
+
+    if (text.trim()) {
       await session.enqueueMessage(
         appendReferenceContext(text, await this.buildPrivateReferenceText(session, message)),
         { replyTarget }

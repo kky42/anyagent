@@ -24,6 +24,14 @@ function linkMarkdown(label, url) {
   return href ? `[${text}](${href})` : text;
 }
 
+function prefixedToken(value, prefix) {
+  const token = String(value ?? "").trim();
+  if (!token) {
+    return "";
+  }
+  return token.startsWith(prefix) ? token : `${prefix}${token}`;
+}
+
 export function richTextToMarkdown(value) {
   if (value === null || value === undefined) {
     return "";
@@ -88,13 +96,13 @@ export function richTextToMarkdown(value) {
     case "reference_link":
       return value.reference_name ? `${text}[^${value.reference_name}]` : text;
     case "mention":
+      return prefixedToken(text || value.username || value.value || value.name, "@");
     case "hashtag":
+      return prefixedToken(text || value.hashtag || value.value || value.name, "#");
     case "cashtag":
-      return text || String(value.value ?? value.name ?? "");
-    case "bot_command": {
-      const command = text || String(value.value ?? value.name ?? "");
-      return command && !command.startsWith("/") ? `/${command}` : command;
-    }
+      return prefixedToken(text || value.cashtag || value.value || value.name, "$");
+    case "bot_command":
+      return prefixedToken(text || value.bot_command || value.value || value.name, "/");
     default:
       return text || String(value.expression ?? value.alternative_text ?? value.url ?? value.name ?? "");
   }

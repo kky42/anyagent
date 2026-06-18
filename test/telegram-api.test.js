@@ -47,7 +47,7 @@ test("editMessageText sends the Telegram edit payload", async () => {
   assert.deepEqual(result, { message_id: 7 });
 });
 
-test("sendMessage prefers Telegram message thread routing when both targets are available", async () => {
+test("sendMessage prefers direct-message topic routing when both targets are available", async () => {
   const calls = [];
   const api = new TelegramBotApi("token", async (url, options) => {
     calls.push({
@@ -82,7 +82,7 @@ test("sendMessage prefers Telegram message thread routing when both targets are 
         text: "hello",
         disable_web_page_preview: true,
         parse_mode: "HTML",
-        message_thread_id: 11
+        direct_messages_topic_id: 22
       }
     }
   ]);
@@ -211,7 +211,7 @@ test("sendRichMessage sends rich markdown payloads", async () => {
           markdown: "| A | B |\n| --- | --- |\n| 1 | 2 |",
           skip_entity_detection: true
         },
-        message_thread_id: 11
+        direct_messages_topic_id: 22
       }
     }
   ]);
@@ -450,7 +450,7 @@ test("deleteMessage sends the Telegram delete payload", async () => {
   assert.equal(result, true);
 });
 
-test("sendChatAction includes Telegram thread routing fields", async () => {
+test("sendChatAction skips channel direct-message topics", async () => {
   const calls = [];
   const api = new TelegramBotApi("token", async (url, options) => {
     calls.push({
@@ -469,26 +469,18 @@ test("sendChatAction includes Telegram thread routing fields", async () => {
     };
   });
 
-  await api.sendChatAction({
+  const result = await api.sendChatAction({
     chatId: 1001,
     action: "typing",
     messageThreadId: 11,
     directMessagesTopicId: 22
   });
 
-  assert.deepEqual(calls, [
-    {
-      url: "https://api.telegram.org/bottoken/sendChatAction",
-      payload: {
-        chat_id: 1001,
-        action: "typing",
-        message_thread_id: 11
-      }
-    }
-  ]);
+  assert.equal(result, true);
+  assert.deepEqual(calls, []);
 });
 
-test("sendChatAction omits direct-message topic routing when no message thread id is available", async () => {
+test("sendChatAction includes Telegram thread routing when no direct topic is available", async () => {
   const calls = [];
   const api = new TelegramBotApi("token", async (url, options) => {
     calls.push({
@@ -510,16 +502,17 @@ test("sendChatAction omits direct-message topic routing when no message thread i
   await api.sendChatAction({
     chatId: 1001,
     action: "typing",
-    directMessagesTopicId: 22
+    messageThreadId: 11
   });
 
   assert.deepEqual(calls[0].payload, {
     chat_id: 1001,
-    action: "typing"
+    action: "typing",
+    message_thread_id: 11
   });
 });
 
-test("sendChatAction retries with direct-message topic routing when Telegram rejects message_thread_id", async () => {
+test("sendChatAction does not retry with unsupported direct-message topic routing", async () => {
   const calls = [];
   const api = new TelegramBotApi("token", async (url, options) => {
     const payload = JSON.parse(options.body);
@@ -552,11 +545,14 @@ test("sendChatAction retries with direct-message topic routing when Telegram rej
     };
   });
 
-  await api.sendChatAction({
-    chatId: 1001,
-    action: "typing",
-    messageThreadId: 11
-  });
+  await assert.rejects(
+    () => api.sendChatAction({
+      chatId: 1001,
+      action: "typing",
+      messageThreadId: 11
+    }),
+    (error) => error instanceof TelegramApiError && /message thread not found/i.test(error.message)
+  );
 
   assert.deepEqual(
     calls.map((call) => call.payload),
@@ -565,11 +561,6 @@ test("sendChatAction retries with direct-message topic routing when Telegram rej
         chat_id: 1001,
         action: "typing",
         message_thread_id: 11
-      },
-      {
-        chat_id: 1001,
-        action: "typing",
-        direct_messages_topic_id: 11
       }
     ]
   );
@@ -614,7 +605,7 @@ test("sendLocalAttachment uploads a multipart Telegram payload", async () => {
   assert.deepEqual(result, { message_id: 9 });
 });
 
-test("sendLocalAttachment prefers Telegram message thread routing when both targets are available", async () => {
+test("sendLocalAttachment prefers direct-message topic routing when both targets are available", async () => {
   const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-telegram-api-"));
   const filePath = path.join(workdir, "report.pdf");
   await fs.writeFile(filePath, "pdf", "utf8");
@@ -647,8 +638,8 @@ test("sendLocalAttachment prefers Telegram message thread routing when both targ
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, "https://api.telegram.org/bottoken/sendDocument");
-  assert.equal(calls[0].body.get("message_thread_id"), "11");
-  assert.equal(calls[0].body.has("direct_messages_topic_id"), false);
+  assert.equal(calls[0].body.get("direct_messages_topic_id"), "22");
+  assert.equal(calls[0].body.has("message_thread_id"), false);
   assert.equal(calls[0].body.has("reply_parameters"), false);
 });
 

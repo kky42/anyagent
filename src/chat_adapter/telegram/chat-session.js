@@ -85,7 +85,6 @@ export function replyTargetFromTelegramMessage(message) {
   const target = {};
   const messageThreadId = message?.message_thread_id;
   const directMessagesTopicId = message?.direct_messages_topic?.topic_id;
-  const isPrivateChat = message?.chat?.type === "private";
 
   if (messageThreadId !== null && messageThreadId !== undefined) {
     target.messageThreadId = messageThreadId;
@@ -95,22 +94,6 @@ export function replyTargetFromTelegramMessage(message) {
     directMessagesTopicId !== undefined
   ) {
     target.directMessagesTopicId = directMessagesTopicId;
-  }
-  if (
-    isPrivateChat &&
-    target.directMessagesTopicId === undefined &&
-    messageThreadId !== null &&
-    messageThreadId !== undefined
-  ) {
-    target.directMessagesTopicId = messageThreadId;
-  }
-  if (
-    isPrivateChat &&
-    target.messageThreadId === undefined &&
-    directMessagesTopicId !== null &&
-    directMessagesTopicId !== undefined
-  ) {
-    target.messageThreadId = directMessagesTopicId;
   }
   return Object.keys(target).length > 0 ? target : null;
 }

@@ -192,10 +192,10 @@ export class TelegramBotApi {
     if (parseMode) {
       payload.parse_mode = parseMode;
     }
-    if (messageThreadId !== null && messageThreadId !== undefined) {
-      payload.message_thread_id = messageThreadId;
-    } else if (directMessagesTopicId !== null && directMessagesTopicId !== undefined) {
+    if (directMessagesTopicId !== null && directMessagesTopicId !== undefined) {
       payload.direct_messages_topic_id = directMessagesTopicId;
+    } else if (messageThreadId !== null && messageThreadId !== undefined) {
+      payload.message_thread_id = messageThreadId;
     }
 
     return this.callWithThreadFallback("sendMessage", payload, options);
@@ -228,10 +228,10 @@ export class TelegramBotApi {
     if (skipEntityDetection !== null && skipEntityDetection !== undefined) {
       payload.rich_message.skip_entity_detection = Boolean(skipEntityDetection);
     }
-    if (messageThreadId !== null && messageThreadId !== undefined) {
-      payload.message_thread_id = messageThreadId;
-    } else if (directMessagesTopicId !== null && directMessagesTopicId !== undefined) {
+    if (directMessagesTopicId !== null && directMessagesTopicId !== undefined) {
       payload.direct_messages_topic_id = directMessagesTopicId;
+    } else if (messageThreadId !== null && messageThreadId !== undefined) {
+      payload.message_thread_id = messageThreadId;
     }
 
     return this.callWithThreadFallback("sendRichMessage", payload, options);
@@ -324,10 +324,10 @@ export class TelegramBotApi {
     if (parseMode) {
       formData.append("parse_mode", parseMode);
     }
-    if (messageThreadId !== null && messageThreadId !== undefined) {
-      formData.append("message_thread_id", String(messageThreadId));
-    } else if (directMessagesTopicId !== null && directMessagesTopicId !== undefined) {
+    if (directMessagesTopicId !== null && directMessagesTopicId !== undefined) {
       formData.append("direct_messages_topic_id", String(directMessagesTopicId));
+    } else if (messageThreadId !== null && messageThreadId !== undefined) {
+      formData.append("message_thread_id", String(messageThreadId));
     }
 
     return this.callWithThreadFallback(target.method, formData, options);
@@ -339,6 +339,10 @@ export class TelegramBotApi {
     messageThreadId = null,
     directMessagesTopicId = null
   }, options = {}) {
+    if (directMessagesTopicId !== null && directMessagesTopicId !== undefined) {
+      return true;
+    }
+
     const payload = {
       chat_id: chatId,
       action
@@ -347,7 +351,7 @@ export class TelegramBotApi {
       payload.message_thread_id = messageThreadId;
     }
 
-    return this.callWithThreadFallback("sendChatAction", payload, options);
+    return this.call("sendChatAction", payload, options);
   }
 
   async downloadFile(filePath, options = {}) {

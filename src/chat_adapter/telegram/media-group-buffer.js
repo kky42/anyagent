@@ -1,5 +1,5 @@
-function mediaGroupKey(chatId, mediaGroupId) {
-  return `${chatId}:${mediaGroupId}`;
+function mediaGroupKey(session, mediaGroupId) {
+  return `${session.chatId}:${session.conversationId}:${mediaGroupId}`;
 }
 
 export class MediaGroupBuffer {
@@ -18,7 +18,7 @@ export class MediaGroupBuffer {
       return typeof handleMessages === "function" ? handleMessages([message]) : undefined;
     }
 
-    const key = mediaGroupKey(session.chatId, mediaGroupId);
+    const key = mediaGroupKey(session, mediaGroupId);
     const existing = this.pendingMediaGroups.get(key);
     if (existing?.timer) {
       clearTimeout(existing.timer);
