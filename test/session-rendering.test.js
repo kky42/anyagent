@@ -111,6 +111,126 @@ test("private progress uses Telegram rich message drafts when available", async 
   await flush();
 });
 
+test("private rich draft progress refreshes while the run is still active", async () => {
+  const fakeBotApi = new FakeBotApi({ supportsRichDrafts: true });
+  const { session } = await createSession({ fakeBotApi });
+
+  await session.renderProgressText("reasoning");
+  await session.messageRenderer.refreshProgressDraft();
+
+  assert.equal(fakeBotApi.richDrafts.length, 2);
+  assert.equal(fakeBotApi.richDrafts[0].draftId, fakeBotApi.richDrafts[1].draftId);
+  assert.deepEqual(fakeBotApi.messages, []);
+});
+
+test("private rich draft progress falls back to a message if refresh fails", async () => {
+  const fakeBotApi = new FakeBotApi({ supportsRichDrafts: true });
+  const { session } = await createSession({ fakeBotApi });
+
+  await session.renderProgressText("reasoning");
+  fakeBotApi.failRichDraftOnce = true;
+  await session.messageRenderer.refreshProgressDraft();
+
+  assert.equal(fakeBotApi.richDrafts.length, 1);
+  assert.deepEqual(fakeBotApi.messages, [
+    {
+      chatId: 1001,
+      text: "🟢 reasoning",
+      parseMode: "HTML"
+    }
+  ]);
+});
+
+test("rich draft progress is not materialized after a final agent_message", async () => {
+  const fakeBotApi = new FakeBotApi({ supportsRichDrafts: true });
+  const { session, runnerFactory } = await createSession({ fakeBotApi });
+
+  await session.enqueueMessage("first");
+  const run = runnerFactory.runs[0];
+
+  await run.emit({
+    type: "item.started",
+    item: {
+      id: "item_1",
+      type: "reasoning",
+      status: "in_progress"
+    }
+  });
+  await run.emit({
+    type: "item.completed",
+    item: {
+      id: "item_2",
+      type: "agent_message",
+      text: "done"
+    }
+  });
+  await run.emit({
+    type: "turn.completed"
+  });
+  run.finish();
+
+  await flush();
+  await flush();
+
+  assert.equal(fakeBotApi.richDrafts.length, 1);
+  assert.deepEqual(fakeBotApi.messages, [
+    {
+      chatId: 1001,
+      text: "done",
+      parseMode: "HTML"
+    }
+  ]);
+});
+
+test("rich draft progress after a final agent_message is not materialized on completion", async () => {
+  const fakeBotApi = new FakeBotApi({ supportsRichDrafts: true });
+  const { session, runnerFactory } = await createSession({ fakeBotApi });
+
+  await session.enqueueMessage("first");
+  const run = runnerFactory.runs[0];
+
+  await run.emit({
+    type: "item.started",
+    item: {
+      id: "item_1",
+      type: "reasoning",
+      status: "in_progress"
+    }
+  });
+  await run.emit({
+    type: "item.completed",
+    item: {
+      id: "item_2",
+      type: "agent_message",
+      text: "working"
+    }
+  });
+  await run.emit({
+    type: "item.started",
+    item: {
+      id: "item_3",
+      type: "todo_list",
+      status: "in_progress"
+    }
+  });
+  await run.emit({
+    type: "turn.completed"
+  });
+  run.finish();
+
+  await flush();
+  await flush();
+
+  assert.equal(fakeBotApi.richDrafts.length, 2);
+  assert.deepEqual(fakeBotApi.messages, [
+    {
+      chatId: 1001,
+      text: "working",
+      parseMode: "HTML"
+    }
+  ]);
+});
+
 test("progress items reuse one Telegram message and final agent_message replaces it", async () => {
   const { session, fakeBotApi, runnerFactory } = await createSession();
 

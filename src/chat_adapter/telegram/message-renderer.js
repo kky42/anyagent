@@ -156,6 +156,7 @@ export class MessageRenderer {
     this.logger = logger;
     this.progressMessageId = null;
     this.lastRenderedProgressText = null;
+    this.progressRenderedAsDraft = false;
     this.typingTimer = null;
     this.richMessagesUnavailable = false;
     this.richDraftsUnavailable = false;
@@ -163,15 +164,19 @@ export class MessageRenderer {
   }
 
   resetTransientState() {
+    this.markProgressSuperseded();
+  }
+
+  markProgressSuperseded() {
     this.progressMessageId = null;
     this.lastRenderedProgressText = null;
+    this.progressRenderedAsDraft = false;
     this.richDraftId = null;
   }
 
   async clearProgressMessage() {
     const messageId = this.progressMessageId;
-    this.progressMessageId = null;
-    this.lastRenderedProgressText = null;
+    this.markProgressSuperseded();
 
     if (!messageId) {
       return;
@@ -185,6 +190,29 @@ export class MessageRenderer {
     } catch {
       // Keep attachment delivery moving even if Telegram refuses to delete the transient status.
     }
+  }
+
+  async refreshProgressDraft(options = {}) {
+    const displayText = this.lastRenderedProgressText;
+    if (!this.progressRenderedAsDraft || !displayText) {
+      return;
+    }
+
+    const refreshed = await this.tryRenderProgressDraft(displayText, options);
+    if (refreshed) {
+      return;
+    }
+
+    if (
+      !this.progressRenderedAsDraft ||
+      this.lastRenderedProgressText !== displayText ||
+      this.progressMessageId
+    ) {
+      return;
+    }
+
+    this.progressRenderedAsDraft = false;
+    this.progressMessageId = await this.sendSplitText(displayText, options);
   }
 
   async renderWithFallback(renderAttempt) {
@@ -358,6 +386,7 @@ export class MessageRenderer {
 
     if (await this.tryRenderProgressDraft(displayText, options)) {
       this.lastRenderedProgressText = displayText;
+      this.progressRenderedAsDraft = true;
       return;
     }
 
@@ -368,6 +397,7 @@ export class MessageRenderer {
     }
 
     this.lastRenderedProgressText = displayText;
+    this.progressRenderedAsDraft = false;
   }
 
   async tryRenderRichTerminalText(rawText, options = {}) {
@@ -382,6 +412,8 @@ export class MessageRenderer {
 
     if (this.progressMessageId) {
       await this.clearProgressMessage();
+    } else {
+      this.markProgressSuperseded();
     }
     return true;
   }
@@ -402,8 +434,7 @@ export class MessageRenderer {
       if (firstChunk !== this.lastRenderedProgressText) {
         await this.editMessageChunk(this.progressMessageId, firstChunk, options);
       }
-      this.progressMessageId = null;
-      this.lastRenderedProgressText = null;
+      this.markProgressSuperseded();
 
       for (const rawChunk of remainingChunks) {
         await this.sendMessageChunk(rawChunk, options);
@@ -412,6 +443,7 @@ export class MessageRenderer {
     }
 
     await this.sendSplitText(rawText, options);
+    this.markProgressSuperseded();
   }
 
   async sendAttachment(attachment, options = {}) {
@@ -621,6 +653,12 @@ export class MessageRenderer {
         });
       } catch (error) {
         this.logger(`typing indicator failed: ${toErrorMessage(error)}`);
+      }
+
+      try {
+        await this.refreshProgressDraft({ replyTarget });
+      } catch (error) {
+        this.logger(`progress draft refresh failed: ${toErrorMessage(error)}`);
       }
     };
 
