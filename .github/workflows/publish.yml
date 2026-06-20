@@ -67,7 +67,34 @@ jobs:
             exit 1
           fi
 
+      - name: Check if package version is already published
+        id: npm-version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PACKAGE_NAME=$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).name")
+          PACKAGE_VERSION=$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")
+
+          if PUBLISHED_DIST=$(npm --userconfig=/dev/null view "$PACKAGE_NAME@$PACKAGE_VERSION" dist --json 2>/dev/null); then
+            PUBLISHED_SHASUM=$(PUBLISHED_DIST="$PUBLISHED_DIST" node -p "JSON.parse(process.env.PUBLISHED_DIST).shasum || ''")
+            PACK_JSON=$(npm --userconfig=/dev/null pack --dry-run --json)
+            LOCAL_SHASUM=$(PACK_JSON="$PACK_JSON" node -p "JSON.parse(process.env.PACK_JSON)[0].shasum || ''")
+
+            if [ "$LOCAL_SHASUM" != "$PUBLISHED_SHASUM" ]; then
+              echo "::error::$PACKAGE_NAME@$PACKAGE_VERSION is already published, but the local package shasum ($LOCAL_SHASUM) does not match npm ($PUBLISHED_SHASUM)."
+              exit 1
+            fi
+
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "$PACKAGE_NAME@$PACKAGE_VERSION is already published with matching shasum; skipping npm publish."
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "$PACKAGE_NAME@$PACKAGE_VERSION is not published yet."
+          fi
+
       - name: Verify npm authentication
+        if: github.event_name == 'workflow_dispatch' || steps.npm-version.outputs.published != 'true'
         run: npm whoami
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -79,13 +106,18 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish package
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && steps.npm-version.outputs.published != 'true'
         run: npm publish --access=public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
         if: github.event_name == 'push'
-        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "GitHub Release $GITHUB_REF_NAME already exists; skipping create."
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
