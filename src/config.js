@@ -15,6 +15,7 @@ import {
 } from "./utils.js";
 
 const SUPPORTED_AGENT_CLI_SET = new Set(SUPPORTED_AGENT_CLIS);
+const GROUP_ACCESS_MODES = new Set(["everyone", "allowlist"]);
 
 function assertObject(value, fieldPath) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -50,6 +51,14 @@ function normalizeAllowedUsernames(value, fieldPath) {
 
 function normalizeManagerUsernames(value, fieldPath) {
   return normalizeUsernameList(value, fieldPath);
+}
+
+function normalizeGroupAccess(value, fieldPath, fallback = "everyone") {
+  const normalized = String(value ?? fallback).trim().toLowerCase();
+  if (!GROUP_ACCESS_MODES.has(normalized)) {
+    throw new Error(`${fieldPath} must be one of: everyone, allowlist`);
+  }
+  return normalized;
 }
 
 function normalizeTelegramBotUsername(value, fieldPath) {
@@ -247,6 +256,10 @@ async function normalizeAgentConfig({ agentId, filePath }) {
 
   if (telegram !== null) {
     assertObject(telegram, `${filePath}.bindings.telegram`);
+    const defaultGroupAccess = normalizeGroupAccess(
+      telegram.groupAccess,
+      `${filePath}.bindings.telegram.groupAccess`
+    );
     const defaultAllowedUsernames = normalizeAllowedUsernames(
       telegram.allowedUsernames,
       `${filePath}.bindings.telegram.allowedUsernames`
@@ -267,6 +280,11 @@ async function normalizeAgentConfig({ agentId, filePath }) {
       const prefix = `${filePath}.bindings.telegram.bots[${index}]`;
       assertObject(bot, prefix);
       const username = normalizeTelegramBotUsername(bot.username, `${prefix}.username`);
+      const groupAccess = normalizeGroupAccess(
+        bot.groupAccess,
+        `${prefix}.groupAccess`,
+        defaultGroupAccess
+      );
       if (typeof bot.token !== "string" || !bot.token.trim()) {
         throw new Error(`${prefix}.token must be a non-empty string`);
       }
@@ -288,6 +306,7 @@ async function normalizeAgentConfig({ agentId, filePath }) {
         bindingId: username,
         username,
         token: bot.token.trim(),
+        groupAccess,
         allowedUsernames: [...new Set([...mergedAllowedUsernames, ...mergedManagerUsernames])],
         managerUsernames: mergedManagerUsernames,
         agent: structuredClone(agent),
@@ -300,6 +319,10 @@ async function normalizeAgentConfig({ agentId, filePath }) {
 
   if (mattermost !== null) {
     assertObject(mattermost, `${filePath}.bindings.mattermost`);
+    const defaultGroupAccess = normalizeGroupAccess(
+      mattermost.groupAccess,
+      `${filePath}.bindings.mattermost.groupAccess`
+    );
     const defaultAllowedUsernames = normalizeAllowedUsernames(
       mattermost.allowedUsernames,
       `${filePath}.bindings.mattermost.allowedUsernames`
@@ -321,6 +344,11 @@ async function normalizeAgentConfig({ agentId, filePath }) {
       assertObject(bot, prefix);
       const serverUrl = normalizeMattermostServerUrl(bot.serverUrl, `${prefix}.serverUrl`);
       const username = normalizeMattermostUsername(bot.username, `${prefix}.username`);
+      const groupAccess = normalizeGroupAccess(
+        bot.groupAccess,
+        `${prefix}.groupAccess`,
+        defaultGroupAccess
+      );
       if (typeof bot.token !== "string" || !bot.token.trim()) {
         throw new Error(`${prefix}.token must be a non-empty string`);
       }
@@ -349,6 +377,7 @@ async function normalizeAgentConfig({ agentId, filePath }) {
         serverUrl,
         username,
         token: bot.token.trim(),
+        groupAccess,
         allowedUsernames: [...new Set([...mergedAllowedUsernames, ...mergedManagerUsernames])],
         managerUsernames: mergedManagerUsernames,
         agent: structuredClone(agent),

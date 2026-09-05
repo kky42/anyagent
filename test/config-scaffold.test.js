@@ -28,11 +28,13 @@ test("buildCanonicalAgentConfig includes required profile defaults", () => {
       },
       bindings: {
         telegram: {
+          groupAccess: "allowlist",
           allowedUsernames: ["your-telegram-username"],
           managerUsernames: ["your-telegram-username"],
           bots: []
         },
         mattermost: {
+          groupAccess: "allowlist",
           allowedUsernames: ["your-mattermost-username"],
           managerUsernames: ["your-mattermost-username"],
           bots: []
@@ -64,6 +66,8 @@ test("addAgentConfig creates an agent directory with canonical config", async ()
   assert.equal(config.profile.auto, "medium");
   assert.equal(config.profile.model, "default");
   assert.equal(config.profile.reasoningEffort, "default");
+  assert.equal(config.bindings.telegram.groupAccess, "allowlist");
+  assert.equal(config.bindings.mattermost.groupAccess, "allowlist");
   assert.deepEqual(config.bindings.telegram.bots, []);
   assert.deepEqual(config.bindings.mattermost.bots, []);
 });

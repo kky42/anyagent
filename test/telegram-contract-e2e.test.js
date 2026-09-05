@@ -63,15 +63,17 @@ async function waitForRunCount(runnerFactory, count) {
   await waitFor(() => runnerFactory.runs.length === count, 20);
 }
 
-async function createContractRuntime() {
+async function createContractRuntime(options = {}) {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-tg-contract-"));
   const workdir = path.join(tempDir, "workdir");
   await fs.mkdir(workdir, { recursive: true });
   return {
     ...(await createRuntime({
       botConfig: {
+        ...options.botConfig,
         agent: {
-          workdir
+          workdir,
+          ...options.botConfig?.agent
         }
       }
     })),
@@ -202,7 +204,12 @@ test("Telegram group E2E sends related REPLY blocks and ATTACH files", async () 
 });
 
 test("Telegram group E2E batches busy group messages and replies only through REPLY blocks", async () => {
-  const { runtime, fakeBotApi, runnerFactory, workdir } = await createContractRuntime();
+  const { runtime, fakeBotApi, runnerFactory, workdir } = await createContractRuntime({
+    botConfig: {
+      allowedUsernames: ["alice", "bob", "carol"],
+      managerUsernames: ["alice"]
+    }
+  });
   const artifactDir = path.join(workdir, "artifacts");
   const photoPath = path.join(artifactDir, "rollout.png");
   await fs.mkdir(artifactDir, { recursive: true });

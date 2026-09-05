@@ -490,8 +490,49 @@ test("runtime sends every group message and silently coalesces pending group tur
   await waitFor(() => session.isRunning === false, 20);
 });
 
-test("runtime lets any group participant trigger the agent", async () => {
-  const { runtime, runnerFactory } = await createRuntime();
+test("runtime ignores unauthorized users in every Telegram group-like conversation", async () => {
+  const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
+
+  await runtime.handleMessage(
+    buildGroupTextMessage("uploads fail after deploy", {
+      message_id: 1,
+      chat: { id: -1001, type: "group" },
+      from: { id: 99, username: "OtherUser" }
+    })
+  );
+  await runtime.handleMessage(
+    buildGroupTextMessage("@relaybot inspect the repository", {
+      message_id: 2,
+      chat: { id: -2002, type: "supergroup" },
+      message_thread_id: 77,
+      from: { id: 99, username: "OtherUser" }
+    })
+  );
+  await runtime.handleMessage({
+    message_id: 3,
+    date: 1700000003,
+    chat: { id: -2002, type: "supergroup" },
+    from: { id: 99, username: "OtherUser" },
+    document: {
+      file_id: "unauthorized-document",
+      file_unique_id: "unauthorized-document",
+      file_name: "prompt.txt",
+      mime_type: "text/plain",
+      file_size: 7
+    }
+  });
+
+  assert.equal(runnerFactory.runs.length, 0);
+  assert.equal(fakeBotApi.messages.length, 0);
+  assert.equal(fakeBotApi.getFileCalls.length, 0);
+  assert.equal(runtime.sessions.size, 0);
+  assert.equal(runtime.mediaGroupBuffer.hasPending(), false);
+});
+
+test("runtime lets any Telegram group participant trigger the agent in everyone mode", async () => {
+  const { runtime, runnerFactory } = await createRuntime({
+    botConfig: { groupAccess: "everyone" }
+  });
 
   await runtime.handleMessage(
     buildGroupTextMessage("uploads fail after deploy", {
@@ -506,7 +547,12 @@ test("runtime lets any group participant trigger the agent", async () => {
 });
 
 test("runtime includes Telegram group sender display name and username", async () => {
-  const { runtime, runnerFactory } = await createRuntime();
+  const { runtime, runnerFactory } = await createRuntime({
+    botConfig: {
+      allowedUsernames: ["y_xm"],
+      managerUsernames: ["alloweduser"]
+    }
+  });
 
   await runtime.handleMessage(
     buildGroupTextMessage("please check this", {
@@ -784,7 +830,7 @@ test("runtime ignores empty unsupported Telegram group updates", async () => {
   assert.equal(runtime.sessions.size, 0);
 });
 
-test("runtime rejects relay commands from unauthorized Telegram group users", async () => {
+test("runtime silently ignores relay commands from unauthorized Telegram group users", async () => {
   const { runtime, fakeBotApi, runnerFactory } = await createRuntime();
 
   await runtime.handleMessage(
@@ -795,7 +841,8 @@ test("runtime rejects relay commands from unauthorized Telegram group users", as
   );
 
   assert.equal(runnerFactory.runs.length, 0);
-  assert.equal(fakeBotApi.messages.at(-1).text, "Only manager users can run AnyAgent commands.");
+  assert.equal(fakeBotApi.messages.length, 0);
+  assert.equal(runtime.sessions.size, 0);
 });
 
 test("runtime authorizes private topic messages before group-like routing", async () => {
