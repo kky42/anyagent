@@ -741,17 +741,28 @@ export class BotRuntime {
     if (parsedCommand?.ignored && !isDirect) {
       return;
     }
-    const session = this.sessionFor(platformChannelId, {
-      conversationId,
-      deliveryAnchor: deliveryAnchorFromMattermostPost(post)
-    });
 
-    if (isDirect && !this.isAuthorized({ username: post?.user?.username ?? post?.username })) {
+    if (
+      !this.isAuthorized({ username: post?.user?.username ?? post?.username }) &&
+      (isDirect || this.botConfig.groupAccess !== "everyone")
+    ) {
+      if (!isDirect) {
+        return;
+      }
+      const session = this.sessionFor(platformChannelId, {
+        conversationId,
+        deliveryAnchor: deliveryAnchorFromMattermostPost(post)
+      });
       await session.sendText(unauthorizedMessage(post?.user), {
         replyTarget: replyTargetFromMattermostPost(post)
       });
       return;
     }
+
+    const session = this.sessionFor(platformChannelId, {
+      conversationId,
+      deliveryAnchor: deliveryAnchorFromMattermostPost(post)
+    });
 
     if (parsedCommand?.ignored) {
       if (isDirect) {

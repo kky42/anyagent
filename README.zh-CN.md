@@ -70,6 +70,7 @@ anyagent
   },
   "bindings": {
     "telegram": {
+      "groupAccess": "allowlist",
       "allowedUsernames": ["your-telegram-username"],
       "managerUsernames": ["your-telegram-username"],
       "bots": [
@@ -81,6 +82,7 @@ anyagent
       ]
     },
     "mattermost": {
+      "groupAccess": "allowlist",
       "allowedUsernames": ["your-mattermost-username"],
       "managerUsernames": ["your-mattermost-username"],
       "bots": [
@@ -105,17 +107,20 @@ anyagent
 | `profile.auto` | agent 执行动作时的权限等级：`low`、`medium` 或 `high`。 |
 | `profile.model` | 可选的模型覆盖配置。使用 `default` 表示沿用 CLI 默认值。 |
 | `profile.reasoningEffort` | 可选的 reasoning 覆盖配置。使用 `default` 表示沿用 CLI 默认值。 |
-| `allowedUsernames` | direct/private chat 里允许和 agent 对话的聊天平台 username。group-like chat 里普通参与者消息不受这个列表限制。 |
-| `managerUsernames` | 允许运行聊天命令的 username。省略时使用 `allowedUsernames` 作为 manager。manager 在 direct/private chat 中会自动获得访问权限。 |
+| `groupAccess` | group-like chat 的访问策略：`allowlist` 或 `everyone`。 |
+| `allowedUsernames` | direct/private chat 中允许的 username；当 `groupAccess` 为 `allowlist` 时，也用于 group-like chat。 |
+| `managerUsernames` | 允许运行聊天命令的 username。省略时使用 `allowedUsernames` 作为 manager。manager 会自动获得与 agent 对话的权限。 |
 | `bots[].token` | BotFather 提供的 Telegram bot token。 |
 | `mattermost.bots[].serverUrl` | Mattermost server 的基础 URL。 |
 | `mattermost.bots[].token` | Mattermost bot access token。 |
+
+在 `telegram` 或 `mattermost` 上设置 `groupAccess`，可以为该平台的所有 bot 指定统一策略。单个 bot 可通过 `bots[].groupAccess` 覆盖平台配置；没有覆盖值的 bot 会继承平台配置。未配置该字段的旧配置继续使用原有的 `everyone` 行为，新创建的 profile 则默认使用 `allowlist`。
 
 如果你不知道自己的 Telegram username，先给 bot 发送任意消息。未授权回复里会显示需要加入配置的标准化 username。
 
 ## Telegram 群聊
 
-在 group 和 supergroup 里，只要聊天平台把非命令消息投递给 bot，AnyAgent 就会触发 agent，或把这条消息合并进下一次等待处理的 agent turn。agent 正在运行时收到多条未处理群消息，AnyAgent 会按投递顺序把它们合并成一段 plain-text transcript，包含时间、显示名、handle、消息正文，以及紧贴对应消息的已下载附件。
+在 group 和 supergroup 里，访问由 `groupAccess` 控制。`allowlist` 只处理 `allowedUsernames` 或 `managerUsernames` 中用户的消息，其他消息会被静默忽略；`everyone` 会处理平台投递的每条参与者消息。agent 正在运行时收到多条未处理群消息，AnyAgent 会按投递顺序把它们合并成一段 plain-text transcript，包含时间、显示名、handle、消息正文，以及紧贴对应消息的已下载附件。
 
 群聊命令必须在支持的位置提到当前 bot：命令前（`@your_bot_username /status`）、命令 token 内（`/status@your_bot_username`），或紧跟在命令后、命令参数前（`/status @your_bot_username`、`/auto @your_bot_username high`）。位于命令参数之后的 target，例如 `/auto high @your_bot_username`，不会被解析为命令 target。使用这些 target 形式指向其他 bot 的命令会被静默忽略。命令形态的消息不会发送给 agent。
 
@@ -129,6 +134,8 @@ Telegram bot 也收不到其他 bot 发出的消息，所以同一个群里的�
 在 direct message 里，每个 Mattermost direct channel 对应一个 agent session。在普通 channel 和 group message 里，每个非命令 post 都会触发 agent，或合并进下一次等待处理的 agent turn。
 
 Mattermost channel post、group message 和 thread 都属于 group-like chat。Mattermost thread 会按 thread root 创建独立 agent session。thread 的第一次 turn 会把 thread root 当作普通 transcript message 放在新消息前面。
+
+Mattermost group-like chat 的访问由 `groupAccess` 控制。`allowlist` 只允许 `allowedUsernames` 或 `managerUsernames` 中的用户触发 agent，其他消息会被静默忽略；`everyone` 允许所有参与者触发 agent。direct message 始终要求用户位于 allowed 或 manager 列表中。
 
 Mattermost group-like command 必须在支持的位置提到当前 bot：命令前（`@your_bot_username !status`）、命令 token 内（`!status@your_bot_username`），或紧跟在命令后、命令参数前（`!status @your_bot_username`、`!auto @your_bot_username high`）。位于命令参数之后的 target，例如 `!auto high @your_bot_username`，不会被解析为命令 target。使用这些 target 形式指向其他 bot 的命令会被忽略，包括 `@other_bot !status` 和 `@other_bot /status`。
 

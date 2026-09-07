@@ -24,6 +24,7 @@ export async function createSession(options = {}) {
   const botConfig = {
     username: "relaybot",
     token: "token",
+    groupAccess: "allowlist",
     allowedUsernames: ["alloweduser"],
     managerUsernames: ["alloweduser"],
     agent,
@@ -77,6 +78,7 @@ export async function createRuntime(options = {}) {
   const botConfig = {
     username: "relaybot",
     token: "token",
+    groupAccess: "allowlist",
     allowedUsernames: ["alloweduser"],
     managerUsernames: ["alloweduser"],
     agent,

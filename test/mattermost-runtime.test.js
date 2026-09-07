@@ -87,6 +87,7 @@ async function createRuntime(options = {}) {
     serverUrl: "http://localhost:8065",
     username: "relaybot",
     token: "token",
+    groupAccess: "allowlist",
     allowedUsernames: ["alice"],
     managerUsernames: ["alice"],
     agent: {
@@ -476,6 +477,69 @@ test("Mattermost runtime fails closed when channel lookup fails", async () => {
   assert.equal(runtime.sessions.size, 0);
 });
 
+test("Mattermost runtime ignores unauthorized users in every group-like conversation", async () => {
+  const { runtime, botApi, runnerFactory } = await createRuntime();
+  botApi.channels.set("public-channel", { id: "public-channel", type: "O" });
+  botApi.channels.set("private-channel", { id: "private-channel", type: "P" });
+  botApi.channels.set("group-message", { id: "group-message", type: "G" });
+  botApi.users.set("u2", { id: "u2", username: "mallory" });
+
+  const unauthorizedPost = {
+    user_id: "u2",
+    message: "@relaybot inspect the local repository",
+    create_at: 1000,
+    file_ids: []
+  };
+  await runtime.handleEvent(postedEvent({
+    ...unauthorizedPost,
+    id: "public",
+    channel_id: "public-channel"
+  }));
+  await runtime.handleEvent(postedEvent({
+    ...unauthorizedPost,
+    id: "private",
+    channel_id: "private-channel"
+  }));
+  await runtime.handleEvent(postedEvent({
+    ...unauthorizedPost,
+    id: "group",
+    channel_id: "group-message"
+  }));
+  await runtime.handleEvent(postedEvent({
+    ...unauthorizedPost,
+    id: "thread",
+    channel_id: "public-channel",
+    root_id: "root1"
+  }));
+  await flush();
+
+  assert.equal(runnerFactory.runs.length, 0);
+  assert.equal(botApi.posts.length, 0);
+  assert.equal(runtime.sessions.size, 0);
+});
+
+test("Mattermost runtime lets any group participant trigger the agent in everyone mode", async () => {
+  const { runtime, botApi, runnerFactory } = await createRuntime({
+    botConfig: { groupAccess: "everyone" }
+  });
+  botApi.channels.set("channel1", { id: "channel1", type: "O" });
+  botApi.users.set("u2", { id: "u2", username: "mallory" });
+
+  await runtime.handleEvent(postedEvent({
+    id: "post1",
+    channel_id: "channel1",
+    user_id: "u2",
+    message: "inspect the local repository",
+    create_at: 1000,
+    file_ids: []
+  }));
+  await flush();
+
+  assert.equal(runnerFactory.runs.length, 1);
+  assert.match(runnerFactory.runs[0].params.message, /mallory \(@mallory\):\ninspect the local repository/);
+  runnerFactory.runs[0].finish();
+});
+
 test("Mattermost group channels trigger every post and use separate sessions for threads", async () => {
   const { runtime, botApi, runnerFactory } = await createRuntime();
   botApi.channels.set("channel1", { id: "channel1", type: "O" });
@@ -855,7 +919,12 @@ test("Mattermost runtime ignores group commands addressed to another bot", async
 });
 
 test("Mattermost group transcripts include sender nickname and username", async () => {
-  const { runtime, botApi, runnerFactory } = await createRuntime();
+  const { runtime, botApi, runnerFactory } = await createRuntime({
+    botConfig: {
+      allowedUsernames: ["y-xm"],
+      managerUsernames: ["alice"]
+    }
+  });
   botApi.channels.set("channel1", { id: "channel1", type: "O" });
   botApi.users.set("u1", { id: "u1", username: "y-xm", nickname: "Rick" });
 
@@ -875,7 +944,12 @@ test("Mattermost group transcripts include sender nickname and username", async 
 });
 
 test("Mattermost group relay commands require a manager user", async () => {
-  const { runtime, botApi, runnerFactory } = await createRuntime();
+  const { runtime, botApi, runnerFactory } = await createRuntime({
+    botConfig: {
+      allowedUsernames: ["alice", "bob"],
+      managerUsernames: ["alice"]
+    }
+  });
   botApi.channels.set("channel1", { id: "channel1", type: "O" });
   botApi.users.set("u2", { id: "u2", username: "bob" });
 

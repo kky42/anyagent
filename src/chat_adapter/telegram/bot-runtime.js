@@ -905,6 +905,10 @@ export class BotRuntime {
       return;
     }
 
+    if (this.botConfig.groupAccess !== "everyone" && !this.isAuthorized(message.from)) {
+      return;
+    }
+
     const text = messageText(message);
     const parsedCommand = parseCommand(text, this.botUsername ?? this.botConfig.username);
     if (parsedCommand?.ignored) {

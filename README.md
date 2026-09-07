@@ -70,6 +70,7 @@ A fuller config example looks like this:
   },
   "bindings": {
     "telegram": {
+      "groupAccess": "allowlist",
       "allowedUsernames": ["your-telegram-username"],
       "managerUsernames": ["your-telegram-username"],
       "bots": [
@@ -81,6 +82,7 @@ A fuller config example looks like this:
       ]
     },
     "mattermost": {
+      "groupAccess": "allowlist",
       "allowedUsernames": ["your-mattermost-username"],
       "managerUsernames": ["your-mattermost-username"],
       "bots": [
@@ -105,11 +107,14 @@ Important fields:
 | `profile.auto` | Permission level for agent actions: `low`, `medium`, or `high`. |
 | `profile.model` | Optional model override. Use `default` to keep the CLI default. |
 | `profile.reasoningEffort` | Optional reasoning override. Use `default` to keep the CLI default. |
-| `allowedUsernames` | Chat usernames allowed to talk to the agent in direct/private chats. Group-like chats allow normal participant messages without this list. |
-| `managerUsernames` | Chat usernames allowed to run chat commands. If omitted, `allowedUsernames` are used as managers. Managers are automatically allowed in direct/private chats. |
+| `groupAccess` | Group-like chat access: `allowlist` or `everyone`. |
+| `allowedUsernames` | Chat usernames allowed in direct/private chats and, when `groupAccess` is `allowlist`, in group-like chats. |
+| `managerUsernames` | Chat usernames allowed to run chat commands. If omitted, `allowedUsernames` are used as managers. Managers are automatically allowed to talk to the agent. |
 | `bots[].token` | Telegram bot token from BotFather. |
 | `mattermost.bots[].serverUrl` | Base URL for the Mattermost server. |
 | `mattermost.bots[].token` | Mattermost bot access token. |
+
+Set `groupAccess` on `telegram` or `mattermost` to use one policy for all bots on that platform. A bot can override it with `bots[].groupAccess`; bots without an override inherit the platform value. Existing configs that omit the field keep the original `everyone` behavior, while newly scaffolded profiles use `allowlist`.
 
 If you do not know your Telegram username, send the bot any message once. The unauthorized reply shows the normalized username to add.
 
@@ -131,7 +136,7 @@ The combined prompt snapshot is stored in AnyAgent local state so resumed Claude
 
 ## Telegram Group Chats
 
-In group chats and supergroups, every non-command message delivered to the bot triggers the agent or joins the next pending agent turn. If multiple unprocessed group messages arrive while the agent is running, AnyAgent sends them to the agent as one plain-text transcript in delivery order, including timestamp, display name, handle, message text, and downloaded attachments next to the message that carried them.
+In group chats and supergroups, access follows `groupAccess`. With `allowlist`, only messages from users listed in `allowedUsernames` or `managerUsernames` are processed and other messages are ignored silently. With `everyone`, every delivered participant message is processed. If multiple unprocessed group messages arrive while the agent is running, AnyAgent sends them to the agent as one plain-text transcript in delivery order, including timestamp, display name, handle, message text, and downloaded attachments next to the message that carried them.
 
 Group commands must mention the bot in a supported target position: before the command (`@your_bot_username /status`), inside the command token (`/status@your_bot_username`), or immediately after the command (`/status @your_bot_username`, `/auto @your_bot_username high`). Targets after command arguments, such as `/auto high @your_bot_username`, are not parsed as command targets. Commands for another bot using the same target positions are silently ignored. Command-shaped messages are never sent to the agent.
 
@@ -143,6 +148,8 @@ Telegram bots also do not receive messages from other bots, so one bot in a grou
 ## Mattermost Chats
 
 In direct messages, each Mattermost direct channel maps to one agent session. In channels and group messages, every non-command post triggers the agent or joins the next pending agent turn.
+
+Mattermost group-like access follows `groupAccess`. With `allowlist`, only users listed in `allowedUsernames` or `managerUsernames` can trigger the agent and other posts are ignored silently. With `everyone`, every participant can trigger the agent. Direct messages always require an allowed or manager username.
 
 Mattermost channel posts, group messages, and threads are group-like chats. A Mattermost thread gets its own agent session keyed by the thread root. The first turn in a thread includes the thread root as a normal transcript message before the new message.
 

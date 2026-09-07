@@ -32,6 +32,7 @@ test("loadConfig loads agent profiles and telegram bindings", async () => {
     },
     bindings: {
       telegram: {
+        groupAccess: "allowlist",
         allowedUsernames: ["@OwnerUser"],
         bots: [
           {
@@ -59,6 +60,7 @@ test("loadConfig loads agent profiles and telegram bindings", async () => {
   assert.equal(config.telegramBots.length, 1);
   assert.equal(config.telegramBots[0].username, "relaybot");
   assert.equal(config.telegramBots[0].bindingId, "relaybot");
+  assert.equal(config.telegramBots[0].groupAccess, "allowlist");
   assert.deepEqual(config.telegramBots[0].managerUsernames, ["ownermanager", "manageruser"]);
   assert.deepEqual(config.telegramBots[0].allowedUsernames, [
     "owneruser",
@@ -92,12 +94,14 @@ test("loadConfig loads mattermost bindings", async () => {
     },
     bindings: {
       mattermost: {
+        groupAccess: "allowlist",
         allowedUsernames: ["@OwnerUser"],
         bots: [
           {
             serverUrl: "http://localhost:8065/",
             username: "@RelayBot",
             token: "token-1",
+            groupAccess: "everyone",
             allowedUsernames: ["@Allowed.User"],
             managerUsernames: ["@Manager.User"]
           }
@@ -114,6 +118,7 @@ test("loadConfig loads mattermost bindings", async () => {
   assert.equal(config.mattermostBots[0].serverUrl, "http://localhost:8065");
   assert.equal(config.mattermostBots[0].username, "relaybot");
   assert.equal(config.mattermostBots[0].bindingId, "localhost:8065:relaybot");
+  assert.equal(config.mattermostBots[0].groupAccess, "everyone");
   assert.deepEqual(config.mattermostBots[0].managerUsernames, ["owner.user", "manager.user"]);
   assert.deepEqual(config.mattermostBots[0].allowedUsernames, [
     "owneruser",
@@ -216,6 +221,7 @@ test("loadConfig defaults profile values", async () => {
   assert.equal(config.agents[0].auto, "medium");
   assert.equal(config.agents[0].model, "default");
   assert.equal(config.agents[0].reasoningEffort, "default");
+  assert.equal(config.telegramBots[0].groupAccess, "everyone");
   assert.deepEqual(config.telegramBots[0].allowedUsernames, []);
   assert.deepEqual(config.telegramBots[0].managerUsernames, []);
 });
@@ -247,6 +253,29 @@ test("loadConfig treats allowed usernames as managers when manager usernames are
 
   assert.deepEqual(config.telegramBots[0].allowedUsernames, ["owneruser", "alloweduser"]);
   assert.deepEqual(config.telegramBots[0].managerUsernames, ["owneruser", "alloweduser"]);
+});
+
+test("loadConfig rejects unsupported group access modes", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-config-"));
+  const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "anyagent-workdir-"));
+
+  await writeAgentConfig(tempDir, "primary", {
+    profile: {
+      cli: "codex",
+      workdir
+    },
+    bindings: {
+      telegram: {
+        groupAccess: "members",
+        bots: []
+      }
+    }
+  });
+
+  await assert.rejects(
+    () => loadConfig(tempDir),
+    /bindings\.telegram\.groupAccess must be one of: everyone, allowlist/
+  );
 });
 
 test("loadConfig rejects missing workdir values", async () => {

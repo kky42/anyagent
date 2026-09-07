@@ -339,7 +339,12 @@ test("Mattermost group E2E sends related REPLY blocks and ATTACH files", async (
 });
 
 test("Mattermost group E2E batches busy group posts and replies only through REPLY blocks", async () => {
-  const { runtime, botApi, runnerFactory, workdir } = await createRuntime();
+  const { runtime, botApi, runnerFactory, workdir } = await createRuntime({
+    botConfig: {
+      allowedUsernames: ["alice", "bob", "carol"],
+      managerUsernames: ["alice"]
+    }
+  });
   botApi.channels.set("town-square", { id: "town-square", type: "O" });
   botApi.users.set("u1", { id: "u1", username: "alice" });
   botApi.users.set("u2", { id: "u2", username: "bob" });
